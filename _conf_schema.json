@@ -1,0 +1,81 @@
+{
+  "enabled": {
+    "description": "启用插件",
+    "hint": "关闭后定时推送将停止，但指令与 LLM 工具仍可使用",
+    "type": "bool",
+    "default": true
+  },
+  "cron_expr": {
+    "description": "定时推送 Cron 表达式",
+    "hint": "标准 5 段 cron（分 时 日 月 周），默认 0 9 * * * 表示每天 09:00 推送一次",
+    "type": "string",
+    "default": "0 9 * * *"
+  },
+  "enabled_sources": {
+    "description": "启用信源",
+    "hint": "可选信源: qianxin(奇安信) / aliyun(阿里云安全) / cnnvd(CNNVD)，按顺序抓取",
+    "type": "list",
+    "default": ["qianxin", "aliyun", "cnnvd"]
+  },
+  "push_targets": {
+    "description": "推送目标列表",
+    "hint": "支持纯 session_id（如 oc_xxx、群号）或完整 UMO（如 telegram:GroupMessage:xxx）",
+    "type": "list",
+    "default": []
+  },
+  "ai_summary": {
+    "description": "启用 AI 摘要",
+    "hint": "开启后使用 AstrBot 已配置对话模型生成结构化中文摘要；失败自动降级为原始列表",
+    "type": "bool",
+    "default": true
+  },
+  "selected_provider_id": {
+    "description": "AI 摘要调用的模型",
+    "hint": "点击后弹出已配置的模型提供商列表进行选择，留空则使用当前默认模型",
+    "type": "string",
+    "default": "",
+    "_special": "select_provider"
+  },
+  "summary_timeout": {
+    "description": "AI 摘要超时时间（秒）",
+    "hint": "超过该时长未返回则降级为原始列表，默认 90 秒",
+    "type": "int",
+    "default": 90
+  },
+  "max_push_items": {
+    "description": "单次推送最大条数",
+    "hint": "限制单次推送展示的漏洞条数上限，默认 10",
+    "type": "int",
+    "default": 10
+  },
+  "dedup_window_days": {
+    "description": "去重窗口天数",
+    "hint": "超过该天数的去重记录会被自动清理，默认 30 天",
+    "type": "int",
+    "default": 30
+  },
+  "request_timeout": {
+    "description": "HTTP 请求超时时间（秒）",
+    "hint": "抓取信源时单次请求超时时间，默认 20 秒",
+    "type": "int",
+    "default": 20
+  },
+  "max_requests_per_host": {
+    "description": "单次任务每域名最大请求数",
+    "hint": "同一域名单次抓取任务的最大请求次数，防止对目标站点造成压力，默认 5",
+    "type": "int",
+    "default": 5
+  },
+  "admin_user_ids": {
+    "description": "管理员用户 ID 列表",
+    "hint": "允许执行 /vuln reset 清空去重记录的用户 sender_id 列表",
+    "type": "list",
+    "default": []
+  },
+  "push_only_new": {
+    "description": "仅推送新条目",
+    "hint": "开启后只推送未推送过的漏洞（按去重窗口判断）；关闭后重复推送全部条目",
+    "type": "bool",
+    "default": true
+  }
+}

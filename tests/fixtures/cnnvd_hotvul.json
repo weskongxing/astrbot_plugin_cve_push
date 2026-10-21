@@ -1,0 +1,21 @@
+{
+  "code": 200,
+  "data": [
+    {
+      "vulId": 88001,
+      "vulName": "某产品缓冲区溢出漏洞 CVE-2026-5555",
+      "cnnvdCode": "CNNVD-202610-1001",
+      "hazardLevel": "超危",
+      "publishTime": "2026-10-21",
+      "hasAi": 1
+    },
+    {
+      "vulId": 88002,
+      "vulName": "某系统权限提升漏洞",
+      "cnnvdCode": "CNNVD-202610-1002",
+      "hazardLevel": "高危",
+      "publishTime": "2026-10-20",
+      "hasAi": 0
+    }
+  ]
+}

@@ -1,0 +1,57 @@
+{
+  "status": 10000,
+  "data": {
+    "vuln_add_count": 3,
+    "key_vuln_add": [
+      {
+        "id": 1001,
+        "qvd_code": "QVD-2026-10001",
+        "cve_code": "CVE-2026-1111",
+        "vuln_name": "某远程代码执行漏洞",
+        "rating_level": "高危",
+        "publish_time": "2026-10-21 09:00:00",
+        "description": "这是一个远程代码执行漏洞的详细描述，攻击者可通过构造恶意请求执行任意代码。",
+        "tag": [
+          {"name": "RCE"},
+          {"name": "在野利用"}
+        ]
+      },
+      {
+        "id": 1002,
+        "qvd_code": "QVD-2026-10002",
+        "cve_code": "",
+        "vuln_name": "含 CVE-2026-2222 的权限提升漏洞",
+        "rating_level": "critical",
+        "publish_time": "2026-10-20 08:00:00",
+        "description": "权限提升漏洞描述。",
+        "tag": [
+          {"name": "提权"}
+        ]
+      }
+    ],
+    "poc_exp_add": [
+      {
+        "id": 1002,
+        "qvd_code": "QVD-2026-10002",
+        "cve_code": "",
+        "vuln_name": "POC 列表中的重复标题（应被 key 优先覆盖）",
+        "rating_level": "低危",
+        "publish_time": "2026-10-20 08:00:00",
+        "description": "",
+        "tag": []
+      },
+      {
+        "id": 1003,
+        "qvd_code": "QVD-2026-10003",
+        "cve_code": "CVE-2026-3333",
+        "vuln_name": "某中间件反序列化漏洞",
+        "rating_level": "high",
+        "publish_time": "2026-10-22 10:00:00",
+        "description": "反序列化漏洞描述。",
+        "tag": [
+          {"name": "反序列化"}
+        ]
+      }
+    ]
+  }
+}

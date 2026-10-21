@@ -1,0 +1,14 @@
+name: astrbot_plugin_vuln_push
+display_name: CVE漏洞推送
+desc: 定时抓取奇安信 / 阿里云安全 / CNNVD 最新 CVE 漏洞情报，跨信源去重 + 可选 AI 摘要，推送到群聊，并注册 /vuln 指令与 2 项 LLM 工具
+version: v1.0.0
+author: weskongxing
+repo: https://github.com/weskongxing/astrbot_plugin_vuln_push
+astrbot_version: ">=4.11.2"
+support_platforms:
+  - lark
+  - aiocqhttp
+  - wecom
+  - qq_official_webhook
+  - telegram
+  - wechat
