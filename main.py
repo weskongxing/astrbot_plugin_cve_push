@@ -139,7 +139,7 @@ class PushLatestVulnerabilitiesTool(FunctionTool[AstrAgentContext]):
 # --------------------------------------------------------------------------- #
 # 插件主体
 # --------------------------------------------------------------------------- #
-@register("astrbot_plugin_vuln_push", "weskongxing", "CVE漏洞推送插件", "v1.0.0")
+@register("astrbot_plugin_vuln_push", "weskongxing", "CVE漏洞推送插件", "v1.0.1")
 class VulnPushPlugin(Star):
     """CVE 漏洞推送插件。"""
 
@@ -172,6 +172,7 @@ class VulnPushPlugin(Star):
             context=self.context,
             timeout_seconds=int(self.config.get("summary_timeout", 90)),
             max_items=int(self.config.get("max_push_items", 10)),
+            provider_id=str(self.config.get("selected_provider_id", "") or ""),
         )
 
         # cron 解析：非法表达式回退默认并告警
@@ -322,10 +323,41 @@ class VulnPushPlugin(Star):
     async def _build_push_text(self, items: List[VulnItem]) -> str:
         max_items = int(self.config.get("max_push_items", 10))
         if self.config.get("ai_summary", True):
+            self._sync_summarizer_config()
             summary = await self.summarizer.summarize(items)
             if summary:
                 return format_summary_message(summary, items)
         return format_raw_message(items, max_items=max_items)
+
+    def _sync_summarizer_config(self) -> None:
+        """推送前把最新配置同步给摘要器，WebUI 改配置后无需重载插件即可生效。"""
+        try:
+            self.summarizer.configure(
+                provider_id=str(self.config.get("selected_provider_id", "") or ""),
+                timeout_seconds=int(self.config.get("summary_timeout", 90)),
+                max_items=int(self.config.get("max_push_items", 10)),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[漏洞推送] 同步 AI 摘要配置异常: %s", exc)
+
+    def _describe_last_summary(self) -> str:
+        """把最近一次 AI 摘要结果整理成一行中文状态。"""
+        outcome = self.summarizer.last_outcome
+        provider = self.summarizer.last_provider
+        if outcome == "成功":
+            return f"成功（模型 {provider or '未命名'}，耗时 {self.summarizer.last_elapsed:.1f} 秒）"
+        if outcome == "降级":
+            return f"降级为原始列表（{self.summarizer.last_error or '未知原因'}）"
+        return outcome
+
+    async def _cmd_ai_test(self) -> str:
+        """自检 AI 摘要链路：真实调用一次模型并回报结果。"""
+        self._sync_summarizer_config()
+        try:
+            return await self.summarizer.self_test()
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("[漏洞推送] AI 摘要自检异常: %s", exc)
+            return f"[失败] AI 摘要自检异常: {exc}"
 
     async def _prepare_push_text(
         self, limit: int, source_filter: str = "all"
@@ -375,7 +407,7 @@ class VulnPushPlugin(Star):
     # ------------------------------------------------------------------ 指令
     @filter.command("vuln", alias={"漏洞"})
     async def cmd_vuln(self, event: AstrMessageEvent, sub: str = ""):
-        """/vuln [push|status|reset]，缺省为抓取最新漏洞推送到当前会话。"""
+        """/vuln [push|status|test|reset]，缺省为抓取最新漏洞推送到当前会话。"""
         sub = (sub or "").strip().lower()
         try:
             if sub in ("", "fetch", "latest"):
@@ -384,6 +416,8 @@ class VulnPushPlugin(Star):
                 yield event.plain_result(await self._cmd_push_targets())
             elif sub in ("status",):
                 yield event.plain_result(self._cmd_status())
+            elif sub in ("test", "ai", "ai-test", "aitest"):
+                yield event.plain_result(await self._cmd_ai_test())
             elif sub in ("reset",):
                 yield event.plain_result(self._cmd_reset(event))
             else:
@@ -418,6 +452,8 @@ class VulnPushPlugin(Star):
             "下次执行时间": next_run_str,
             "信源开关": self.config.get("enabled_sources", _DEFAULT_SOURCES),
             "AI 摘要": "开启" if self.config.get("ai_summary", True) else "关闭",
+            "AI 摘要模型": self.summarizer.provider_id or "（跟随 AstrBot 默认模型）",
+            "最近一次 AI 摘要": self._describe_last_summary(),
             "仅推送新条目": "是" if self.config.get("push_only_new", True) else "否",
             "推送目标数量": len(self._get_push_targets()),
             "去重记录总数": stats.get("total", 0),
@@ -453,5 +489,6 @@ class VulnPushPlugin(Star):
             "/vuln push - 抓取并推送到配置的群聊目标\n"
             "/vuln status - 查看插件运行状态\n"
             "/vuln reset - 清空去重记录（仅管理员）\n"
+            "/vuln test - 自检 AI 摘要链路（排查模型不可用问题）\n"
             "LLM 工具: get_latest_vulnerabilities / push_latest_vulnerabilities"
         )

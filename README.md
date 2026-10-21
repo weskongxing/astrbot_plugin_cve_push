@@ -6,7 +6,7 @@
 跨信源去重后推送到指定群聊，可选调用 AstrBot 已配置的对话模型生成中文摘要，
 并同时注册 `/vuln` 指令与 2 项 LLM 工具，让机器人能"被问到就答"。
 
-![version](https://img.shields.io/badge/version-v1.0.0-blue)
+![version](https://img.shields.io/badge/version-v1.0.1-blue)
 ![astrbot](https://img.shields.io/badge/AstrBot-%3E%3D4.11.2-green)
 ![python](https://img.shields.io/badge/Python-3.10%2B-yellow)
 ![license](https://img.shields.io/badge/license-MIT-lightgrey)
@@ -25,6 +25,7 @@
 - [合规抓取说明](#合规抓取说明)
 - [开发与测试](#开发与测试)
 - [常见问题](#常见问题)
+- [更新日志](#更新日志)
 - [许可协议](#许可协议)
 
 ---
@@ -39,7 +40,7 @@
 | AI 摘要（可选） | 调用 AstrBot 已配置的对话模型生成"等级 + 受影响产品 + 漏洞描述 + 处置建议"结构化摘要；失败或超时自动降级为原始列表 |
 | 定时任务 | 内置 5 段 cron 解析器，支持 `*`、`a-b`、`*/n`、`a-b/n`、`a,b,c`，无需额外依赖 |
 | 群聊推送 | 支持纯 session_id（`oc_xxx`、群号）或完整 UMO（`telegram:GroupMessage:xxx`）多目标推送 |
-| 指令 | `/vuln`、`/vuln push`、`/vuln status`、`/vuln reset`，别名 `/漏洞` |
+| 指令 | `/vuln`、`/vuln push`、`/vuln status`、`/vuln test`、`/vuln reset`，别名 `/漏洞` |
 | LLM 工具 | 注册 `get_latest_vulnerabilities`、`push_latest_vulnerabilities`，支持自然语言查询与推送 |
 | 故障隔离 | 单个信源抓取失败只记警告，不影响其余信源与整轮推送 |
 | 全链路异常捕获 | 后台协程、指令、LLM 工具、定时循环全部兜底捕获，单个异常不会导致宿主崩溃 |
@@ -136,7 +137,7 @@ docker restart astrbot
 | `enabled_sources` | list | `["qianxin","aliyun","cnnvd"]` | 启用信源，按列表顺序抓取 |
 | `push_targets` | list | `[]` | 推送目标列表，支持纯 session_id 或完整 UMO |
 | `ai_summary` | bool | `true` | 是否启用 AI 摘要，关闭则直接推送原始列表 |
-| `selected_provider_id` | string | `""` | AI 摘要使用的模型提供商 ID，留空使用当前默认模型 |
+| `selected_provider_id` | string | `""` | AI 摘要优先使用的模型提供商 ID；留空则跟随 AstrBot 当前默认对话模型。解析失败时按候选链回退：插件配置的 `selected_provider_id` -> AstrBot 当前对话模型 -> 任意可用对话模型；全部失败才降级为原始列表。配置热读取，无需重载插件 |
 | `summary_timeout` | int | `90` | AI 摘要超时秒数，超时降级为原始列表 |
 | `max_push_items` | int | `10` | 单次推送展示的漏洞条数上限 |
 | `dedup_window_days` | int | `30` | 去重窗口天数，超期记录在写入时自动清理 |
@@ -181,7 +182,8 @@ docker restart astrbot
 | --- | --- | --- |
 | `/vuln` | `/漏洞` | 抓取最新漏洞并推送到**当前会话**，同时更新去重记录 |
 | `/vuln push` | - | 抓取并推送到配置的 `push_targets` 群聊目标 |
-| `/vuln status` | - | 查看运行状态：启用状态、cron、下次执行时间、信源开关、AI 开关、推送目标数、去重记录数与最近记录时间 |
+| `/vuln status` | - | 查看运行状态：启用状态、cron、下次执行时间、信源开关、AI 开关、AI 摘要模型、最近一次 AI 摘要、推送目标数、去重记录数与最近记录时间 |
+| `/vuln test` | - | 自检 AI 摘要链路：真实调用一次模型，回报候选链与结果 |
 | `/vuln reset` | - | 清空全部去重记录（仅管理员）；用于需要重新推送历史条目时 |
 
 `/vuln status` 输出示例：
@@ -193,6 +195,8 @@ docker restart astrbot
 下次执行时间: 2026-10-22 09:00:00
 信源开关: qianxin, aliyun, cnnvd
 AI 摘要: 开启
+AI 摘要模型: <provider_id 或 跟随默认>
+最近一次 AI 摘要: <成功/失败摘要，含模型与耗时；无记录则为 - >
 仅推送新条目: 是
 推送目标数量: 1
 去重记录总数: 29
@@ -384,6 +388,9 @@ A：`push_targets` 里的 UMO 前缀与已启用的适配器不匹配。改用�
 **Q：AI 摘要没生效？**
 A：检查 ① `ai_summary` 已开启；② AstrBot 里已配置可用的对话模型；③ `selected_provider_id` 留空或指向存在的模型；④ 日志中是否有 `[摘要器] 失败` 记录。摘要失败会自动降级为原始列表，不影响推送。
 
+**Q：AI 摘要不生效 / 日志出现 AI 摘要调用失败，已降级: Connection error.？**
+A：按顺序排查：① 发送 `/vuln test` 查看候选链与自检结果；② 确认 `selected_provider_id` 是否选中了可用模型（留空则跟随 AstrBot 默认对话模型）；③ 在 AstrBot 模型页单独确认该模型可用；④ 检查 AstrBot 默认对话模型是否指向已失效的中转地址。插件会按候选链逐个尝试，全部失败时降级为原始列表，不影响漏洞推送本身。
+
 **Q：想重新推送历史条目？**
 A：管理员发送 `/vuln reset` 清空去重记录，或临时把 `push_only_new` 设为 `false`。
 
@@ -392,6 +399,23 @@ A：表达式必须是 5 段（`分 时 日 月 周`），不支持 `@daily` 这
 
 **Q：会不会因为异常把 AstrBot 搞崩？**
 A：不会。后台循环、信源抓取、指令处理、LLM 工具调用、推送全部做了独立异常捕获，信源失败只降级不中断。
+
+---
+
+## 更新日志
+
+### v1.0.1
+
+- 修复 AI 摘要忽略 `selected_provider_id`、固定走 AstrBot 默认对话模型，并在默认模型不可用时持续降级的问题
+- AI 摘要模型解析改为候选链：插件配置的 `selected_provider_id` -> AstrBot 当前对话模型 -> 任意可用对话模型；前一个失败自动换下一个，全部失败才降级为原始列表
+- 配置改动无需重载插件，每次推送前热读取最新配置
+- 日志打印实际使用的模型 id、耗时与失败原因
+- 新增 `/vuln test`：真实调用一次模型，自检 AI 摘要链路并回报候选链与结果
+- `/vuln status` 新增展示「AI 摘要模型」与「最近一次 AI 摘要」
+
+### v1.0.0
+
+- 首个版本：多信源抓取 / 跨信源去重 / AI 摘要 / 定时推送 / 指令与 LLM 工具
 
 ---
 
