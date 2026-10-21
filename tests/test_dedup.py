@@ -15,8 +15,8 @@ for _p in (_PARENT_DIR, _PLUGIN_DIR):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from astrbot_plugin_vuln_push.core.dedup import DedupStore
-from astrbot_plugin_vuln_push.core.models import VulnItem
+from astrbot_plugin_cve_push.core.dedup import DedupStore
+from astrbot_plugin_cve_push.core.models import CveItem
 
 
 def make_item(**overrides):
@@ -24,7 +24,7 @@ def make_item(**overrides):
         source="qianxin",
         source_display="奇安信",
         title="测试漏洞标题",
-        vuln_id="QVD-2026-1",
+        source_id="QVD-2026-1",
         cve_id="",
         severity="高危",
         published="2026-10-21",
@@ -33,7 +33,7 @@ def make_item(**overrides):
         tags=[],
     )
     base.update(overrides)
-    return VulnItem(**base)
+    return CveItem(**base)
 
 
 class DedupStoreTests(unittest.TestCase):
@@ -41,7 +41,7 @@ class DedupStoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             store = DedupStore(os.path.join(tmp, "dedup.json"))
             a = make_item(cve_id="CVE-2026-1111")
-            b = make_item(vuln_id="QVD-2026-2", title="另一个漏洞")
+            b = make_item(source_id="QVD-2026-2", title="另一个漏洞")
 
             self.assertEqual(store.filter_new([a, b]), [a, b])
             self.assertFalse(store.is_pushed(a))
@@ -52,7 +52,7 @@ class DedupStoreTests(unittest.TestCase):
             self.assertEqual(store.filter_new([a, b]), [])
 
             # 相同 CVE 的不同条目应命中同一去重键
-            dup = make_item(cve_id="cve-2026-1111", vuln_id="OTHER-1")
+            dup = make_item(cve_id="cve-2026-1111", source_id="OTHER-1")
             self.assertTrue(store.is_pushed(dup))
 
     def test_reset(self):
@@ -70,7 +70,7 @@ class DedupStoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             store = DedupStore(os.path.join(tmp, "dedup.json"), window_days=30)
             a = make_item(cve_id="CVE-2026-1111")
-            b = make_item(vuln_id="QVD-2026-2", title="另一个漏洞")
+            b = make_item(source_id="QVD-2026-2", title="另一个漏洞")
             store.mark_pushed([a], now=1_700_000_000.0)
             store.mark_pushed([b], now=1_700_000_100.0)
 
@@ -92,7 +92,7 @@ class DedupStoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             store = DedupStore(os.path.join(tmp, "dedup.json"), window_days=30)
             a = make_item(cve_id="CVE-2026-1111")
-            b = make_item(vuln_id="QVD-2026-2", title="另一个漏洞")
+            b = make_item(source_id="QVD-2026-2", title="另一个漏洞")
 
             now1 = 1_700_000_000.0
             now2 = now1 + 31 * 86400.0  # 31 天后，超出 30 天窗口

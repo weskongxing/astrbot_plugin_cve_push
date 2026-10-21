@@ -14,13 +14,13 @@ for _p in (_PARENT_DIR, _PLUGIN_DIR):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from astrbot_plugin_vuln_push.core.formatter import (
+from astrbot_plugin_cve_push.core.formatter import (
     format_item_line,
     format_raw_message,
     format_status_message,
     format_summary_message,
 )
-from astrbot_plugin_vuln_push.core.models import VulnItem
+from astrbot_plugin_cve_push.core.models import CveItem
 
 _EMOJI_RE = re.compile(
     "[\U0001F300-\U0001FAFF"
@@ -35,7 +35,7 @@ def make_item(**overrides):
         source="qianxin",
         source_display="奇安信",
         title="测试漏洞标题",
-        vuln_id="QVD-2026-1",
+        source_id="QVD-2026-1",
         cve_id="CVE-2026-1111",
         severity="高危",
         published="2026-10-21",
@@ -44,7 +44,7 @@ def make_item(**overrides):
         tags=[],
     )
     base.update(overrides)
-    return VulnItem(**base)
+    return CveItem(**base)
 
 
 class FormatterTests(unittest.TestCase):
@@ -70,7 +70,7 @@ class FormatterTests(unittest.TestCase):
         self.assertIn("测试漏洞标题", single)
 
         batch = format_raw_message(
-            [make_item(title="漏洞一"), make_item(title="漏洞二", vuln_id="QVD-2026-2")]
+            [make_item(title="漏洞一"), make_item(title="漏洞二", source_id="QVD-2026-2")]
         )
         self.assertIn("漏洞一", batch)
         self.assertIn("漏洞二", batch)
@@ -80,7 +80,7 @@ class FormatterTests(unittest.TestCase):
         self.assertIn("暂无漏洞数据", text)
 
     def test_raw_message_max_items(self):
-        items = [make_item(title=f"漏洞{i}", vuln_id=f"QVD-2026-{i}") for i in range(1, 15)]
+        items = [make_item(title=f"漏洞{i}", source_id=f"QVD-2026-{i}") for i in range(1, 15)]
         text = format_raw_message(items, max_items=5)
         self.assertIn("漏洞1", text)
         self.assertIn("漏洞5", text)
@@ -91,7 +91,7 @@ class FormatterTests(unittest.TestCase):
         items = [
             make_item(
                 title="超长漏洞标题" * 30,
-                vuln_id=f"QVD-2026-{i}",
+                source_id=f"QVD-2026-{i}",
                 cve_id="",
                 url="https://example.com/detail/" + "a" * 150,
             )

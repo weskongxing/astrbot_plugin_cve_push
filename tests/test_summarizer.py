@@ -1,4 +1,4 @@
-"""VulnSummarizer 离线单元测试（候选链回退、超时、自检、去重）。"""
+"""CveSummarizer 离线单元测试（候选链回退、超时、自检、去重）。"""
 
 from __future__ import annotations
 
@@ -17,16 +17,16 @@ for _p in (_PARENT_DIR, _PLUGIN_DIR):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from astrbot_plugin_vuln_push.core.models import VulnItem
-from astrbot_plugin_vuln_push.core.summarizer import VulnSummarizer
+from astrbot_plugin_cve_push.core.models import CveItem
+from astrbot_plugin_cve_push.core.summarizer import CveSummarizer
 
 
-def make_item(**overrides: Any) -> VulnItem:
+def make_item(**overrides: Any) -> CveItem:
     base = dict(
         source="qianxin",
         source_display="奇安信",
         title="测试漏洞标题",
-        vuln_id="QVD-2026-1",
+        source_id="QVD-2026-1",
         cve_id="CVE-2026-1111",
         severity="高危",
         published="2026-10-21",
@@ -35,7 +35,7 @@ def make_item(**overrides: Any) -> VulnItem:
         tags=["测试"],
     )
     base.update(overrides)
-    return VulnItem(**base)
+    return CveItem(**base)
 
 
 class FakeResponse:
@@ -140,7 +140,7 @@ class SummarizerCandidateTests(unittest.TestCase):
             using=other,
             all_providers=[other, preferred],
         )
-        summarizer = VulnSummarizer(ctx, provider_id="pref")
+        summarizer = CveSummarizer(ctx, provider_id="pref")
         text = _run(summarizer.summarize([make_item()]))
         self.assertEqual(text, "来自指定模型")
         self.assertEqual(summarizer.last_outcome, "成功")
@@ -153,8 +153,8 @@ class SummarizerCandidateTests(unittest.TestCase):
         using = FakeProvider("using-model", text="来自当前模型")
         other = FakeProvider("all-0", text="来自列表")
         ctx = FakeContext(by_id={}, using=using, all_providers=[other])
-        summarizer = VulnSummarizer(ctx, provider_id="missing-id")
-        with self.assertLogs("astrbot_plugin_vuln_push", level="WARNING") as cm:
+        summarizer = CveSummarizer(ctx, provider_id="missing-id")
+        with self.assertLogs("astrbot_plugin_cve_push", level="WARNING") as cm:
             text = _run(summarizer.summarize([make_item()]))
         self.assertEqual(text, "来自当前模型")
         self.assertEqual(summarizer.last_provider, "using-model")
@@ -176,13 +176,13 @@ class SummarizerCandidateTests(unittest.TestCase):
             using_error=RuntimeError("using 不可用"),
             all_providers=[first, second],
         )
-        summarizer = VulnSummarizer(ctx_err, provider_id="")
+        summarizer = CveSummarizer(ctx_err, provider_id="")
         text = _run(summarizer.summarize([make_item()]))
         self.assertEqual(text, "来自全部列表首个")
         self.assertEqual(summarizer.last_provider, "all-first")
 
         ctx_none = FakeContext(by_id={}, using=None, all_providers=[first, second])
-        summarizer2 = VulnSummarizer(ctx_none, provider_id="")
+        summarizer2 = CveSummarizer(ctx_none, provider_id="")
         text2 = _run(summarizer2.summarize([make_item()]))
         self.assertEqual(text2, "来自全部列表首个")
         self.assertEqual(summarizer2.last_provider, "all-first")
@@ -198,7 +198,7 @@ class SummarizerFailoverTests(unittest.TestCase):
             using=good,
             all_providers=[bad, good],
         )
-        summarizer = VulnSummarizer(ctx, provider_id="bad")
+        summarizer = CveSummarizer(ctx, provider_id="bad")
         text = _run(summarizer.summarize([make_item()]))
         self.assertEqual(text, "第二个成功")
         self.assertEqual(summarizer.last_outcome, "成功")
@@ -211,7 +211,7 @@ class SummarizerFailoverTests(unittest.TestCase):
         a = FakeProvider("a", error=ConnectionError("网络断开"))
         b = FakeProvider("b", error=RuntimeError("服务不可用"))
         ctx = FakeContext(by_id={"a": a}, using=b, all_providers=[a, b])
-        summarizer = VulnSummarizer(ctx, provider_id="a")
+        summarizer = CveSummarizer(ctx, provider_id="a")
         text = _run(summarizer.summarize([make_item()]))
         self.assertEqual(text, "")
         self.assertEqual(summarizer.last_outcome, "降级")
@@ -229,7 +229,7 @@ class SummarizerFailoverTests(unittest.TestCase):
             using=good,
             all_providers=[empty, good],
         )
-        summarizer = VulnSummarizer(ctx, provider_id="empty")
+        summarizer = CveSummarizer(ctx, provider_id="empty")
         text = _run(summarizer.summarize([make_item()]))
         self.assertEqual(text, "非空摘要")
         self.assertEqual(summarizer.last_provider, "good")
@@ -240,7 +240,7 @@ class SummarizerFailoverTests(unittest.TestCase):
         # 实现侧 max(5, timeout_seconds)，传入 1 实际生效为 5；用 sleep 超过生效超时
         slow = FakeProvider("slow", sleep_seconds=7.0)
         ctx = FakeContext(by_id={"slow": slow}, using=None, all_providers=[slow])
-        summarizer = VulnSummarizer(ctx, provider_id="slow", timeout_seconds=1)
+        summarizer = CveSummarizer(ctx, provider_id="slow", timeout_seconds=1)
         self.assertGreaterEqual(summarizer.timeout_seconds, 5)
         text = _run(summarizer.summarize([make_item()]))
         self.assertEqual(text, "")
@@ -258,7 +258,7 @@ class SummarizerConfigAndFilterTests(unittest.TestCase):
             using=None,
             all_providers=[bad],
         )
-        summarizer = VulnSummarizer(ctx, provider_id="bad")
+        summarizer = CveSummarizer(ctx, provider_id="bad")
         text1 = _run(summarizer.summarize([make_item()]))
         self.assertEqual(text1, "")
         self.assertEqual(summarizer.last_outcome, "降级")
@@ -274,7 +274,7 @@ class SummarizerConfigAndFilterTests(unittest.TestCase):
         tts = FakeTTSProvider("tts-1")
         chat = FakeProvider("chat-1", text="仅对话模型")
         ctx = FakeContext(by_id={}, using=tts, all_providers=[tts, chat])
-        summarizer = VulnSummarizer(ctx, provider_id="")
+        summarizer = CveSummarizer(ctx, provider_id="")
         candidates = _run(summarizer._collect_candidates())
         ids = [pid for pid, _ in candidates]
         self.assertNotIn("tts-1", ids)
@@ -287,7 +287,7 @@ class SummarizerConfigAndFilterTests(unittest.TestCase):
         """空 items 列表：返回空串且 last_outcome 为已关闭。"""
         chat = FakeProvider("chat", text="不应被调用")
         ctx = FakeContext(using=chat, all_providers=[chat])
-        summarizer = VulnSummarizer(ctx, provider_id="chat")
+        summarizer = CveSummarizer(ctx, provider_id="chat")
         text = _run(summarizer.summarize([]))
         self.assertEqual(text, "")
         self.assertEqual(summarizer.last_outcome, "已关闭")
@@ -301,7 +301,7 @@ class SummarizerConfigAndFilterTests(unittest.TestCase):
             using=shared,
             all_providers=[shared, shared],
         )
-        summarizer = VulnSummarizer(ctx, provider_id="shared")
+        summarizer = CveSummarizer(ctx, provider_id="shared")
         candidates = _run(summarizer._collect_candidates())
         self.assertEqual(len(candidates), 1)
         self.assertEqual(candidates[0][0], "shared")
@@ -315,7 +315,7 @@ class SummarizerSelfTestTests(unittest.TestCase):
         """self_test 成功时报告含 [完成]。"""
         good = FakeProvider("good", text="自检摘要内容")
         ctx = FakeContext(by_id={"good": good}, using=good, all_providers=[good])
-        summarizer = VulnSummarizer(ctx, provider_id="good")
+        summarizer = CveSummarizer(ctx, provider_id="good")
         report = _run(summarizer.self_test())
         self.assertIn("[AI 摘要链路自检]", report)
         self.assertIn("[完成]", report)
@@ -325,7 +325,7 @@ class SummarizerSelfTestTests(unittest.TestCase):
         """self_test 全部失败时报告含 [失败]。"""
         bad = FakeProvider("bad", error=ConnectionError("自检失败"))
         ctx = FakeContext(by_id={"bad": bad}, using=bad, all_providers=[bad])
-        summarizer = VulnSummarizer(ctx, provider_id="bad")
+        summarizer = CveSummarizer(ctx, provider_id="bad")
         report = _run(summarizer.self_test())
         self.assertIn("[AI 摘要链路自检]", report)
         self.assertIn("[失败]", report)

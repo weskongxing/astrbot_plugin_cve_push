@@ -12,13 +12,13 @@ _SPACE_RE = re.compile(r"\s+")
 
 
 @dataclass
-class VulnItem:
+class CveItem:
     """单条漏洞信息，跨信源统一结构。"""
 
     source: str = ""
     source_display: str = ""
     title: str = ""
-    vuln_id: str = ""
+    source_id: str = ""
     cve_id: str = ""
     severity: str = ""
     published: str = ""
@@ -32,8 +32,8 @@ class VulnItem:
         """跨信源去重键：优先 CVE 编号，其次信源内编号，最后标题指纹。"""
         if self.cve_id:
             return "cve:" + self.cve_id.upper()
-        if self.vuln_id:
-            return "vid:" + self.vuln_id.upper()
+        if self.source_id:
+            return "vid:" + self.source_id.upper()
         return "title:" + self.title_fingerprint
 
     @property
@@ -45,15 +45,19 @@ class VulnItem:
 
     @property
     def display_id(self) -> str:
-        return self.cve_id or self.vuln_id or self.title_fingerprint
+        return self.cve_id or self.source_id or self.title_fingerprint
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "VulnItem":
+    def from_dict(cls, data: Dict[str, Any]) -> "CveItem":
         allowed = {f for f in cls.__dataclass_fields__}
-        return cls(**{k: v for k, v in (data or {}).items() if k in allowed})
+        payload = dict(data or {})
+        # 兼容 v1.0.1 及更早版本写入去重库的旧字段名 vuln_id
+        if "source_id" not in payload and "vuln_id" in payload:
+            payload["source_id"] = payload.get("vuln_id")
+        return cls(**{k: v for k, v in payload.items() if k in allowed})
 
 
 def extract_cve(text: str) -> str:

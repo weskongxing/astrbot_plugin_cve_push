@@ -11,10 +11,10 @@ from typing import List
 
 from bs4 import BeautifulSoup
 
-from ..core.models import VulnItem, extract_cve, normalize_severity
+from ..core.models import CveItem, extract_cve, normalize_severity
 from .base import BaseSource, FetchError
 
-logger = logging.getLogger("astrbot_plugin_vuln_push")
+logger = logging.getLogger("astrbot_plugin_cve_push")
 
 HOMEPAGE_URL = "https://avd.aliyun.com/"
 SITE_BASE = "https://avd.aliyun.com"
@@ -31,7 +31,7 @@ class AliyunSource(BaseSource):
     name = "aliyun"
     display_name = "阿里云安全"
 
-    async def fetch_latest(self, limit: int = 10) -> List[VulnItem]:
+    async def fetch_latest(self, limit: int = 10) -> List[CveItem]:
         try:
             html = await self.fetcher.request(
                 "GET", HOMEPAGE_URL, expect_json=False
@@ -54,9 +54,9 @@ class AliyunSource(BaseSource):
             raise FetchError(f"阿里云数据解析异常: {exc}") from exc
 
     @staticmethod
-    def _parse(html: str) -> List[VulnItem]:
+    def _parse(html: str) -> List[CveItem]:
         soup = BeautifulSoup(html or "", "html.parser")
-        items: List[VulnItem] = []
+        items: List[CveItem] = []
         for tr in soup.find_all("tr"):
             link = tr.find("a", href=_DETAIL_HREF_RE)
             if link is None:
@@ -67,21 +67,21 @@ class AliyunSource(BaseSource):
 
             href = str(link.get("href") or "")
             avd_match = _AVD_RE.search(href)
-            vuln_id = avd_match.group(0) if avd_match else ""
-            if not vuln_id:
+            source_id = avd_match.group(0) if avd_match else ""
+            if not source_id:
                 cell_text = cells[0].get_text(" ", strip=True)
                 m = _AVD_RE.search(cell_text)
-                vuln_id = m.group(0) if m else cell_text
+                source_id = m.group(0) if m else cell_text
 
             title = cells[1].get_text(" ", strip=True)
-            vuln_type = cells[2].get_text(" ", strip=True)
+            cve_type = cells[2].get_text(" ", strip=True)
             published = cells[3].get_text(" ", strip=True)
             status = cells[4].get_text(" ", strip=True)
 
             cve_id = extract_cve(title)
             tags: List[str] = []
-            if vuln_type and vuln_type != _UNDEFINED:
-                tags = [vuln_type]
+            if cve_type and cve_type != _UNDEFINED:
+                tags = [cve_type]
 
             if status == _UNDEFINED:
                 severity = normalize_severity("")
@@ -89,11 +89,11 @@ class AliyunSource(BaseSource):
                 severity = normalize_severity(status)
 
             items.append(
-                VulnItem(
+                CveItem(
                     source=AliyunSource.name,
                     source_display=AliyunSource.display_name,
                     title=title,
-                    vuln_id=vuln_id,
+                    source_id=source_id,
                     cve_id=cve_id,
                     severity=severity,
                     published=published,

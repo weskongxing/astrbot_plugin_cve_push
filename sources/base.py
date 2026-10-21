@@ -19,9 +19,9 @@ from urllib.parse import urlparse
 
 import httpx
 
-from ..core.models import VulnItem
+from ..core.models import CveItem
 
-logger = logging.getLogger("astrbot_plugin_vuln_push")
+logger = logging.getLogger("astrbot_plugin_cve_push")
 
 DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -151,6 +151,6 @@ class BaseSource(abc.ABC):
         self.fetcher = fetcher
 
     @abc.abstractmethod
-    async def fetch_latest(self, limit: int = 10) -> List[VulnItem]:
+    async def fetch_latest(self, limit: int = 10) -> List[CveItem]:
         """抓取最新漏洞列表，失败时抛出 FetchError。"""
         raise NotImplementedError

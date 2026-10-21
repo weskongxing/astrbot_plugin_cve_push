@@ -9,14 +9,14 @@
 
 from .models import (
     SEVERITY_ORDER,
-    VulnItem,
+    CveItem,
     extract_cve,
     normalize_severity,
     severity_rank,
 )
 
 __all__ = [
-    "VulnItem",
+    "CveItem",
     "extract_cve",
     "severity_rank",
     "normalize_severity",

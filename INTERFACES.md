@@ -1,4 +1,4 @@
-# astrbot_plugin_vuln_push 开发接口规范（INTERFACES）
+# astrbot_plugin_cve_push 开发接口规范（INTERFACES）
 
 本文件是并行开发各模块的唯一接口契约。所有模块必须严格按此实现，禁止改动已给定的公共签名。
 
@@ -16,7 +16,7 @@
 ## 1. 目录结构（固定）
 
 ```
-astrbot_plugin_vuln_push/
+astrbot_plugin_cve_push/
 ├── main.py                 # 插件入口（Star 子类、指令、LLM 工具、定时任务）
 ├── metadata.yaml
 ├── _conf_schema.json
@@ -24,10 +24,10 @@ astrbot_plugin_vuln_push/
 ├── README.md
 ├── core/
 │   ├── __init__.py
-│   ├── models.py           # [已提供] VulnItem
+│   ├── models.py           # [已提供] CveItem
 │   ├── cron_util.py        # CronSchedule 5 段 cron 解析
 │   ├── dedup.py            # DedupStore 持久化去重
-│   ├── summarizer.py       # VulnSummarizer 调用 AstrBot 对话模型
+│   ├── summarizer.py       # CveSummarizer 调用 AstrBot 对话模型
 │   └── formatter.py        # 消息文本构建
 ├── sources/
 │   ├── __init__.py         # build_sources()
@@ -48,11 +48,11 @@ astrbot_plugin_vuln_push/
 ### core/models.py
 ```python
 @dataclass
-class VulnItem:
+class CveItem:
     source: str = ""          # 机器名: "qianxin" / "aliyun" / "cnnvd"
     source_display: str = ""  # 中文名: "奇安信" / "阿里云安全" / "CNNVD"
     title: str = ""
-    vuln_id: str = ""         # 源内编号: QVD-xxx / AVD-xxx / CNNVD-xxx
+    source_id: str = ""         # 源内编号: QVD-xxx / AVD-xxx / CNNVD-xxx
     cve_id: str = ""          # CVE-YYYY-NNNN（可能为空）
     severity: str = ""        # 极危/超危/高危/中危/低危/未知
     published: str = ""       # YYYY-MM-DD
@@ -64,7 +64,7 @@ class VulnItem:
     @property title_fingerprint -> str
     @property display_id -> str
     def to_dict() -> dict
-    @classmethod from_dict(d) -> VulnItem
+    @classmethod from_dict(d) -> CveItem
 
 def extract_cve(text: str) -> str          # 提取第一个 CVE 编号（大写）
 def severity_rank(severity: str) -> int    # 越小越高危
@@ -88,21 +88,21 @@ class BaseSource(abc.ABC):
     display_name: str
     def __init__(self, config: dict, fetcher: HttpFetcher)
     @abc.abstractmethod
-    async def fetch_latest(self, limit: int = 10) -> list[VulnItem]
+    async def fetch_latest(self, limit: int = 10) -> list[CveItem]
 ```
 
 ## 3. 各模块要求
 
 ### 3.1 sources/qianxin.py（子任务 A）
 - 类名 `QianxinSource(BaseSource)`，`name = "qianxin"`，`display_name = "奇安信"`。
-- 接口：`POST https://ti.qianxin.com/alpha-api/v2/vuln/one-day`
+- 接口：`POST https://ti.qianxin.com/alpha-api/v2/cve/one-day`
   - headers: `Referer: https://ti.qianxin.com/`、`Origin: https://ti.qianxin.com`、`Content-Type: application/json`
   - 无请求体。返回 `{"status": 10000, "data": {"key_vuln_add": [...], "poc_exp_add": [...], "vuln_add_count": N, ...}}`
 - 字段映射（`key_vuln_add` 与 `poc_exp_add` 合并，按 `id` 去重，`key_vuln_add` 优先）：
-  - `vuln_id = qvd_code`；`cve_id = extract_cve(cve_code or vuln_name)`；`title = vuln_name`
+  - `source_id = qvd_code`；`cve_id = extract_cve(cve_code or vuln_name)`；`title = vuln_name`
   - `severity = normalize_severity(rating_level)`；`published = publish_time[:10]`
   - `description = description`（截断到 300 字）；`tags = [t["name"] for t in tag]`
-  - `url = "https://ti.qianxin.com/vulnerability/detail/" + str(id)`
+  - `url = "https://ti.qianxin.com/cveerability/detail/" + str(id)`
 - 返回按 `published` 倒序的前 `limit` 条；`status != 10000` 抛 `FetchError`。
 
 ### 3.2 sources/aliyun.py（子任务 A）
@@ -110,7 +110,7 @@ class BaseSource(abc.ABC):
 - 接口：`GET https://avd.aliyun.com/`（返回服务端渲染 HTML，`expect_json=False`）。
 - 用 `BeautifulSoup(html, "html.parser")` 解析：取首页表格中所有含 `/detail?id=AVD-` 的 `<tr>`，
   单元格依次为：`[0] AVD 编号(含 a[href])`、`[1] 漏洞名称(含 CVE-xxxx)`、`[2] 漏洞类型(CWE-xxx 或 未定义)`、`[3] 披露时间`、`[4] 漏洞状态`。
-- 字段映射：`vuln_id = AVD-xxx`；`cve_id = extract_cve(漏洞名称)`；`title = 漏洞名称`；
+- 字段映射：`source_id = AVD-xxx`；`cve_id = extract_cve(漏洞名称)`；`title = 漏洞名称`；
   `published = 披露时间`；`severity = normalize_severity(漏洞状态 或 空 -> "未知")`（状态列常为"未定义"，此时用 `""` -> 归一为 `未知`）；
   `tags = [漏洞类型]`（为 `未定义` 时置空）；`url = "https://avd.aliyun.com" + href`。
 - 解析不到任何条目时抛 `FetchError("阿里云 AVD 首页结构变化，未解析到漏洞条目")`。
@@ -128,7 +128,7 @@ CNNVD 新站为前端签名接口，采用站点公开的「游客签名」流�
   - 返回 `{"code":200,"data":"<20位hex签名>"}`，`code != 200` 抛 `FetchError`。
 - 步骤二（取数据）：`POST {ORIGIN}{BASE}/homePage/hotVulNewList`，json `{}`，
   headers 同上再加 `X-Sign: <签名>`。返回 `{"code":200,"data":[{"vulId","vulName","cnnvdCode","hazardLevel","publishTime","hasAi"}]}`。
-- 字段映射：`vuln_id = cnnvdCode`；`cve_id = extract_cve(vulName)`；`title = vulName`；
+- 字段映射：`source_id = cnnvdCode`；`cve_id = extract_cve(vulName)`；`title = vulName`；
   `severity = normalize_severity(hazardLevel)`；`published = publishTime`；
   `url = "https://www.cnnvd.org.cn/frontend/detail?vulId=" + str(vulId)`；`description = ""`。
 - 每次请求必须使用**全新的** timestamp/nonce（严禁复用），两次 HTTP 调用之间由 HttpFetcher 自动限速。
@@ -157,9 +157,9 @@ class CronSchedule:
 class DedupStore:
     def __init__(self, path: str, window_days: int = 30)
     def load(self) -> None
-    def is_pushed(self, item: VulnItem) -> bool
-    def filter_new(self, items: list[VulnItem]) -> list[VulnItem]   # 保持原顺序，过滤已推送
-    def mark_pushed(self, items: list[VulnItem], now: float | None = None) -> None
+    def is_pushed(self, item: CveItem) -> bool
+    def filter_new(self, items: list[CveItem]) -> list[CveItem]   # 保持原顺序，过滤已推送
+    def mark_pushed(self, items: list[CveItem], now: float | None = None) -> None
     def reset(self) -> None
     def stats(self) -> dict   # {"total": N, "window_days": D, "oldest": "YYYY-MM-DD HH:MM:SS", "newest": "..."}
 ```
@@ -169,10 +169,10 @@ class DedupStore:
 
 ### 3.7 core/summarizer.py（子任务 B）
 ```python
-class VulnSummarizer:
+class CveSummarizer:
     def __init__(self, context, timeout_seconds: int = 90, max_items: int = 15)
     @property last_outcome -> str          # "未调用" / "成功" / "降级" / "已关闭"
-    async def summarize(self, items: list[VulnItem]) -> str
+    async def summarize(self, items: list[CveItem]) -> str
         """返回结构化中文摘要文本；任何失败必须返回空字符串并置 last_outcome="降级"。"""
 ```
 - 取模型：`provider = await self.context.get_using_provider_async()`；若不存在则尝试
@@ -186,9 +186,9 @@ class VulnSummarizer:
 
 ### 3.8 core/formatter.py（子任务 B）
 ```python
-def format_item_line(index: int, item: VulnItem) -> str
-def format_raw_message(items: list[VulnItem], title: str = "最新安全漏洞播报", max_items: int = 10) -> str
-def format_summary_message(summary: str, items: list[VulnItem], title: str = "安全漏洞情报摘要") -> str
+def format_item_line(index: int, item: CveItem) -> str
+def format_raw_message(items: list[CveItem], title: str = "最新安全漏洞播报", max_items: int = 10) -> str
+def format_summary_message(summary: str, items: list[CveItem], title: str = "安全漏洞情报摘要") -> str
 def format_status_message(info: dict) -> str
 ```
 - 纯文本排版，无 emoji，无 Markdown 表格；单条格式示例：
@@ -196,8 +196,8 @@ def format_status_message(info: dict) -> str
 - 长度保护：`format_raw_message` 总长度超过 3500 字时截断并追加 `\n...（更多条目已省略）`。
 
 ### 3.9 main.py（子任务 C）
-- 注册：`@register("astrbot_plugin_vuln_push", "assistant", "多信源安全漏洞情报定时推送插件", "v1.0.0")`
-- 类名 `VulnPushPlugin(Star)`，`__init__(self, context: Context, config: AstrBotConfig)`。
+- 注册：`@register("astrbot_plugin_cve_push", "assistant", "多信源安全漏洞情报定时推送插件", "v1.0.0")`
+- 类名 `CvePushPlugin(Star)`，`__init__(self, context: Context, config: AstrBotConfig)`。
 - 依赖的 AstrBot 4.28.2 API（已在同容器 astrbot_plugin_server_guard 中验证可用）：
   ```python
   from astrbot.api import logger
@@ -208,14 +208,17 @@ def format_status_message(info: dict) -> str
   from astrbot.core.agent.run_context import ContextWrapper
   from astrbot.core.astr_agent_context import AstrAgentContext
   ```
-- 指令（`@filter.command("vuln", alias={"漏洞"})` 形式，参考 server_guard 的用法）：
-  - `/vuln` 或 `/漏洞`：抓取最新漏洞（去重后）并推送到当前会话；
-  - `/vuln push`：抓取并推送到配置的群聊目标；
-  - `/vuln status`：输出插件状态（cron、下次执行时间、信源开关、AI 开关、去重统计）；
-  - `/vuln reset`：清空去重记录（仅管理员/配置内管理员可用）。
+- 指令（AstrBot 标准指令组 `@filter.command_group("cve", alias={"CVE", "漏洞"})`，子指令用 `@cve_group.command(...)`）：
+  - `/cve push`：抓取最新漏洞（去重后）并推送到当前会话；
+  - `/cve targets`：抓取并推送到配置的群聊目标；
+  - `/cve status`：输出插件状态（cron、下次执行时间、信源开关、AI 开关、AI 摘要模型、去重统计）；
+  - `/cve test`：真实调用一次模型自检 AI 摘要链路；
+  - `/cve reset`：清空去重记录（仅管理员/配置内管理员可用）；
+  - `/cve help`：输出指令帮助。
+  - 每条子指令在 WebUI「指令」列表中独立可见（`star_handlers_registry` 中按 `CommandFilter` 归类为 sub_command）。
 - LLM 工具（`context.add_llm_tools(...)`，继承 `FunctionTool[AstrAgentContext]`，pydantic dataclass）：
-  - `get_latest_vulnerabilities(limit: int = 5, source: str = "all")` -> 返回文本，不推送；
-  - `push_latest_vulnerabilities(limit: int = 5, source: str = "all")` -> 抓取并推送到当前会话。
+  - `get_latest_cves(limit: int = 5, source: str = "all")` -> 返回文本，不推送；
+  - `push_latest_cves(limit: int = 5, source: str = "all")` -> 抓取并推送到当前会话。
 - 定时任务：`asyncio.create_task(self._scheduler_loop())`，用 `CronSchedule` 每 20 秒检查一次是否到点；
   `terminate()` 中取消任务。
 - 推送：`ok = await self.context.send_message(target_umo, MessageChain().message(text))`，
@@ -230,12 +233,12 @@ def format_status_message(info: dict) -> str
 ### 3.10 _conf_schema.json / metadata.yaml / requirements.txt / README.md（子任务 C）
 - `metadata.yaml` 参考：
   ```yaml
-  name: astrbot_plugin_vuln_push
+  name: astrbot_plugin_cve_push
   display_name: 多信源安全漏洞推送
   desc: 定时抓取奇安信/阿里云安全/CNNVD 最新漏洞情报，支持跨信源去重与 AI 摘要，推送群聊并注册指令与 LLM 工具
   version: v1.0.0
   author: assistant
-  repo: https://github.com/itboys/astrbot_plugin_vuln_push
+  repo: https://github.com/itboys/astrbot_plugin_cve_push
   astrbot_version: ">=4.11.2"
   ```
 - `requirements.txt` 只写 `httpx` 与 `beautifulsoup4`（容器内已内置，仅作声明）。

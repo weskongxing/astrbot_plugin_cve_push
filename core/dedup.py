@@ -10,9 +10,9 @@ import time
 from datetime import datetime
 from typing import Dict, List, Optional
 
-from .models import VulnItem
+from .models import CveItem
 
-logger = logging.getLogger("astrbot_plugin_vuln_push")
+logger = logging.getLogger("astrbot_plugin_cve_push")
 
 _VERSION = 1
 _EMPTY_DATA: Dict[str, object] = {"version": _VERSION, "records": {}}
@@ -116,16 +116,16 @@ class DedupStore:
                         pass
 
     # ------------------------------------------------------------------ 对外
-    def is_pushed(self, item: VulnItem) -> bool:
+    def is_pushed(self, item: CveItem) -> bool:
         with self._lock:
             return item.dedup_key in self._records
 
-    def filter_new(self, items: List[VulnItem]) -> List[VulnItem]:
+    def filter_new(self, items: List[CveItem]) -> List[CveItem]:
         """保持原顺序，过滤掉已推送的条目。"""
         with self._lock:
             return [item for item in items if item.dedup_key not in self._records]
 
-    def mark_pushed(self, items: List[VulnItem], now: Optional[float] = None) -> None:
+    def mark_pushed(self, items: List[CveItem], now: Optional[float] = None) -> None:
         """标记一组条目为已推送，并清理过期记录后持久化。"""
         if not items:
             return

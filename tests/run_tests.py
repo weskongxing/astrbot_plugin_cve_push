@@ -1,9 +1,9 @@
 """离线单元测试聚合入口。
 
 用法（任选其一）：
-    python astrbot_plugin_vuln_push/tests/run_tests.py
-    cd astrbot_plugin_vuln_push && python tests/run_tests.py
-    python -m unittest discover -s astrbot_plugin_vuln_push/tests -p "test_*.py"
+    python astrbot_plugin_cve_push/tests/run_tests.py
+    cd astrbot_plugin_cve_push && python tests/run_tests.py
+    python -m unittest discover -s astrbot_plugin_cve_push/tests -p "test_*.py"
 """
 
 from __future__ import annotations

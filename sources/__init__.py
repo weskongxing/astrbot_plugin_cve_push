@@ -10,7 +10,7 @@ from .base import BaseSource, HttpFetcher
 from .cnnvd import CnnvdSource
 from .qianxin import QianxinSource
 
-logger = logging.getLogger("astrbot_plugin_vuln_push")
+logger = logging.getLogger("astrbot_plugin_cve_push")
 
 SOURCE_REGISTRY: Dict[str, Type[BaseSource]] = {
     "qianxin": QianxinSource,

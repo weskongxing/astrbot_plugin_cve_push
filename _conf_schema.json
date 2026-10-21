@@ -68,7 +68,7 @@
   },
   "admin_user_ids": {
     "description": "管理员用户 ID 列表",
-    "hint": "允许执行 /vuln reset 清空去重记录的用户 sender_id 列表",
+    "hint": "允许执行 /cve reset 清空去重记录的用户 sender_id 列表",
     "type": "list",
     "default": []
   },

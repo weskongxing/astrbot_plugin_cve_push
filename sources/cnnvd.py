@@ -12,10 +12,10 @@ import string
 import time
 from typing import Any, Dict, List
 
-from ..core.models import VulnItem, extract_cve, normalize_severity
+from ..core.models import CveItem, extract_cve, normalize_severity
 from .base import BaseSource, FetchError
 
-logger = logging.getLogger("astrbot_plugin_vuln_push")
+logger = logging.getLogger("astrbot_plugin_cve_push")
 
 APP_ID = "6i8417579268034679HXvp0Kb6r1C2A9"
 ORIGIN = "https://www.cnnvd.org.cn"
@@ -76,7 +76,7 @@ class CnnvdSource(BaseSource):
             raise FetchError("CNNVD 游客签名接口返回空签名")
         return signature, timestamp, nonce
 
-    async def fetch_latest(self, limit: int = 10) -> List[VulnItem]:
+    async def fetch_latest(self, limit: int = 10) -> List[CveItem]:
         try:
             signature, timestamp, nonce = await self._get_signature()
             headers = self._base_headers(timestamp, nonce)
@@ -109,13 +109,13 @@ class CnnvdSource(BaseSource):
             raise FetchError(f"CNNVD 数据解析异常: {exc}") from exc
 
     @staticmethod
-    def _to_item(record: Dict[str, Any]) -> VulnItem:
+    def _to_item(record: Dict[str, Any]) -> CveItem:
         vul_name = str(record.get("vulName") or "")
-        return VulnItem(
+        return CveItem(
             source=CnnvdSource.name,
             source_display=CnnvdSource.display_name,
             title=vul_name,
-            vuln_id=str(record.get("cnnvdCode") or ""),
+            source_id=str(record.get("cnnvdCode") or ""),
             cve_id=extract_cve(vul_name),
             severity=normalize_severity(str(record.get("hazardLevel") or "")),
             published=str(record.get("publishTime") or ""),

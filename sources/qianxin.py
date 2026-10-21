@@ -8,13 +8,13 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List
 
-from ..core.models import VulnItem, extract_cve, normalize_severity
+from ..core.models import CveItem, extract_cve, normalize_severity
 from .base import BaseSource, FetchError
 
-logger = logging.getLogger("astrbot_plugin_vuln_push")
+logger = logging.getLogger("astrbot_plugin_cve_push")
 
-API_URL = "https://ti.qianxin.com/alpha-api/v2/vuln/one-day"
-DETAIL_URL_BASE = "https://ti.qianxin.com/vulnerability/detail/"
+API_URL = "https://ti.qianxin.com/alpha-api/v2/cve/one-day"
+DETAIL_URL_BASE = "https://ti.qianxin.com/cveerability/detail/"
 
 _DEFAULT_HEADERS = {
     "Referer": "https://ti.qianxin.com/",
@@ -51,7 +51,7 @@ class QianxinSource(BaseSource):
     name = "qianxin"
     display_name = "奇安信"
 
-    async def fetch_latest(self, limit: int = 10) -> List[VulnItem]:
+    async def fetch_latest(self, limit: int = 10) -> List[CveItem]:
         try:
             resp = await self.fetcher.request(
                 "POST",
@@ -95,15 +95,15 @@ class QianxinSource(BaseSource):
             raise FetchError(f"奇安信数据解析异常: {exc}") from exc
 
     @staticmethod
-    def _to_item(record: Dict[str, Any]) -> VulnItem:
+    def _to_item(record: Dict[str, Any]) -> CveItem:
         vuln_name = str(record.get("vuln_name") or "")
         cve_code = str(record.get("cve_code") or "")
         published_raw = str(record.get("publish_time") or "")
-        return VulnItem(
+        return CveItem(
             source=QianxinSource.name,
             source_display=QianxinSource.display_name,
             title=vuln_name,
-            vuln_id=str(record.get("qvd_code") or ""),
+            source_id=str(record.get("qvd_code") or ""),
             cve_id=extract_cve(cve_code or vuln_name),
             severity=normalize_severity(str(record.get("rating_level") or "")),
             published=published_raw[:10],

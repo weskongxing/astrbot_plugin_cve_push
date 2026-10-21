@@ -4,7 +4,7 @@
 - 定时抓取奇安信 / 阿里云安全 / CNNVD 三个公开信源的最新漏洞情报
 - 跨信源去重（优先 CVE 编号，其次源内编号，最后标题指纹）
 - 可选 AI 摘要（调用 AstrBot 已配置对话模型，绝不直连模型 HTTP API）
-- 推送群聊目标，同时注册 /vuln 指令与两个 LLM 工具
+- 推送群聊目标，同时注册 /cve 指令与两个 LLM 工具
 - 全程合规抓取：只读公开数据、限速、退避重试、无凭据、无绕过
 
 硬性约束：
@@ -37,8 +37,8 @@ from .core.formatter import (
     format_status_message,
     format_summary_message,
 )
-from .core.models import VulnItem
-from .core.summarizer import VulnSummarizer
+from .core.models import CveItem
+from .core.summarizer import CveSummarizer
 from .sources import build_sources
 from .sources.base import HttpFetcher
 
@@ -53,8 +53,8 @@ _DEFAULT_SOURCES = ["qianxin", "aliyun", "cnnvd"]
 # LLM 工具
 # --------------------------------------------------------------------------- #
 @dataclass
-class GetLatestVulnerabilitiesTool(FunctionTool[AstrAgentContext]):
-    name: str = "get_latest_vulnerabilities"
+class GetLatestCvesTool(FunctionTool[AstrAgentContext]):
+    name: str = "get_latest_cves"
     description: str = "获取最新安全漏洞情报（奇安信/阿里云安全/CNNVD），只返回文本不推送"
     parameters: dict = Field(
         default_factory=lambda: {
@@ -81,13 +81,13 @@ class GetLatestVulnerabilitiesTool(FunctionTool[AstrAgentContext]):
             source = str(kwargs.get("source", "all") or "all")
             return await self.plugin_instance._do_fetch_text(limit, source)
         except Exception as exc:  # noqa: BLE001
-            logger.exception("[漏洞推送] LLM 工具 get_latest_vulnerabilities 异常: %s", exc)
+            logger.exception("[CVE推送] LLM 工具 get_latest_cves 异常: %s", exc)
             return f"[失败] 工具执行异常: {exc}"
 
 
 @dataclass
-class PushLatestVulnerabilitiesTool(FunctionTool[AstrAgentContext]):
-    name: str = "push_latest_vulnerabilities"
+class PushLatestCvesTool(FunctionTool[AstrAgentContext]):
+    name: str = "push_latest_cves"
     description: str = "抓取最新安全漏洞情报并推送到当前会话（奇安信/阿里云安全/CNNVD）"
     parameters: dict = Field(
         default_factory=lambda: {
@@ -119,7 +119,7 @@ class PushLatestVulnerabilitiesTool(FunctionTool[AstrAgentContext]):
                 [target], limit=limit, source_filter=source
             )
         except Exception as exc:  # noqa: BLE001
-            logger.exception("[漏洞推送] LLM 工具 push_latest_vulnerabilities 异常: %s", exc)
+            logger.exception("[CVE推送] LLM 工具 push_latest_cves 异常: %s", exc)
             return f"[失败] 工具执行异常: {exc}"
 
     @staticmethod
@@ -139,11 +139,11 @@ class PushLatestVulnerabilitiesTool(FunctionTool[AstrAgentContext]):
 # --------------------------------------------------------------------------- #
 # 插件主体
 # --------------------------------------------------------------------------- #
-@register("astrbot_plugin_vuln_push", "weskongxing", "CVE漏洞推送插件", "v1.0.1")
-class VulnPushPlugin(Star):
+@register("astrbot_plugin_cve_push", "weskongxing", "CVE漏洞情报推送", "v1.0.2")
+class CvePushPlugin(Star):
     """CVE 漏洞推送插件。"""
 
-    _active_instances: Set["VulnPushPlugin"] = set()
+    _active_instances: Set["CvePushPlugin"] = set()
 
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
@@ -155,7 +155,7 @@ class VulnPushPlugin(Star):
             try:
                 old_inst._cancel_background_tasks()
             except Exception as exc:  # noqa: BLE001
-                logger.warning("[漏洞推送] 清理旧实例异常: %s", exc)
+                logger.warning("[CVE推送] 清理旧实例异常: %s", exc)
         self._active_instances.clear()
         self._active_instances.add(self)
 
@@ -168,7 +168,7 @@ class VulnPushPlugin(Star):
         )
 
         # AI 摘要器（仅通过 AstrBot 已配置对话模型，禁止直连）
-        self.summarizer = VulnSummarizer(
+        self.summarizer = CveSummarizer(
             context=self.context,
             timeout_seconds=int(self.config.get("summary_timeout", 90)),
             max_items=int(self.config.get("max_push_items", 10)),
@@ -181,7 +181,7 @@ class VulnPushPlugin(Star):
             self.cron = CronSchedule(cron_expr)
         except Exception as exc:  # noqa: BLE001
             logger.warning(
-                "[漏洞推送] cron 表达式无效(%s)，回退默认 %s: %s",
+                "[CVE推送] cron 表达式无效(%s)，回退默认 %s: %s",
                 cron_expr,
                 _DEFAULT_CRON,
                 exc,
@@ -189,19 +189,19 @@ class VulnPushPlugin(Star):
             self.cron = CronSchedule(_DEFAULT_CRON)
 
         # 注册并暴露 LLM 工具
-        self.tool_get = GetLatestVulnerabilitiesTool(plugin_instance=self)
-        self.tool_push = PushLatestVulnerabilitiesTool(plugin_instance=self)
+        self.tool_get = GetLatestCvesTool(plugin_instance=self)
+        self.tool_push = PushLatestCvesTool(plugin_instance=self)
         try:
             self.context.add_llm_tools(self.tool_get, self.tool_push)
-            logger.info("[漏洞推送] 已向宿主 AstrBot 暴露 2 项 LLM 工具")
+            logger.info("[CVE推送] 已向宿主 AstrBot 暴露 2 项 LLM 工具")
         except Exception as exc:  # noqa: BLE001
-            logger.warning("[漏洞推送] LLM 工具注册警告: %s", exc)
+            logger.warning("[CVE推送] LLM 工具注册警告: %s", exc)
 
         # 后台定时任务
         self._is_terminating = False
         self._last_fired_minute: Tuple[int, int, int, int] | None = None
         self._scheduler_task = asyncio.create_task(self._scheduler_loop())
-        logger.info("[漏洞推送] 定时任务循环已启动，cron=%s", self.cron.expr)
+        logger.info("[CVE推送] 定时任务循环已启动，cron=%s", self.cron.expr)
 
     # ------------------------------------------------------------------ 生命周期
     def _cancel_background_tasks(self) -> None:
@@ -214,7 +214,7 @@ class VulnPushPlugin(Star):
             self._scheduler_task.cancel()
 
     async def terminate(self) -> None:
-        logger.info("[漏洞推送] 正在注销并终止后台定时协程...")
+        logger.info("[CVE推送] 正在注销并终止后台定时协程...")
         self._cancel_background_tasks()
         if self in self._active_instances:
             self._active_instances.remove(self)
@@ -226,8 +226,8 @@ class VulnPushPlugin(Star):
             except asyncio.CancelledError:
                 pass
             except Exception as exc:  # noqa: BLE001
-                logger.warning("[漏洞推送] 后台任务收尾异常: %s", exc)
-        logger.info("[漏洞推送] 插件生命周期资源清理完毕")
+                logger.warning("[CVE推送] 后台任务收尾异常: %s", exc)
+        logger.info("[CVE推送] 插件生命周期资源清理完毕")
 
     # ------------------------------------------------------------------ 定时任务
     async def _scheduler_loop(self) -> None:
@@ -245,7 +245,7 @@ class VulnPushPlugin(Star):
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001
-                logger.exception("[漏洞推送] 定时循环异常: %s", exc)
+                logger.exception("[CVE推送] 定时循环异常: %s", exc)
                 try:
                     await asyncio.sleep(30)
                 except asyncio.CancelledError:
@@ -253,17 +253,17 @@ class VulnPushPlugin(Star):
 
     async def _run_scheduled_push(self) -> None:
         if not self.config.get("enabled", True):
-            logger.info("[漏洞推送] 插件已停用，跳过本次定时推送")
+            logger.info("[CVE推送] 插件已停用，跳过本次定时推送")
             return
         targets = self._get_push_targets()
         if not targets:
-            logger.warning("[漏洞推送] 未配置推送目标，跳过定时推送")
+            logger.warning("[CVE推送] 未配置推送目标，跳过定时推送")
             return
         try:
             status = await self._do_push(targets, limit=10, source_filter="all")
-            logger.info("[漏洞推送] 定时推送结果: %s", status)
+            logger.info("[CVE推送] 定时推送结果: %s", status)
         except Exception as exc:  # noqa: BLE001
-            logger.exception("[漏洞推送] 定时推送异常: %s", exc)
+            logger.exception("[CVE推送] 定时推送异常: %s", exc)
 
     # ------------------------------------------------------------------ 抓取与推送
     def _get_push_targets(self) -> List[str]:
@@ -289,19 +289,19 @@ class VulnPushPlugin(Star):
             sources = [s for s in sources if s == source_filter]
         return sources
 
-    async def _fetch_all(self, limit: int, source_filter: str = "all") -> List[VulnItem]:
+    async def _fetch_all(self, limit: int, source_filter: str = "all") -> List[CveItem]:
         """抓取全部启用信源，按披露时间倒序并跨信源去重。"""
         sources = build_sources(self._enabled_sources(source_filter), {}, self._build_fetcher())
-        items: List[VulnItem] = []
+        items: List[CveItem] = []
         for src in sources:
             try:
                 items.extend(await src.fetch_latest(limit=limit))
             except Exception as exc:  # noqa: BLE001
-                logger.warning("[漏洞推送] 信源 %s 抓取失败: %s", src.name, exc)
+                logger.warning("[CVE推送] 信源 %s 抓取失败: %s", src.name, exc)
 
         items.sort(key=lambda it: it.published or "", reverse=True)
         seen: Set[str] = set()
-        deduped: List[VulnItem] = []
+        deduped: List[CveItem] = []
         for item in items:
             key = item.dedup_key
             if key in seen:
@@ -312,7 +312,7 @@ class VulnPushPlugin(Star):
 
     async def _collect_for_push(
         self, limit: int, source_filter: str = "all"
-    ) -> List[VulnItem]:
+    ) -> List[CveItem]:
         items = await self._fetch_all(limit, source_filter)
         if not items:
             return []
@@ -320,7 +320,7 @@ class VulnPushPlugin(Star):
             return self.dedup.filter_new(items)
         return items
 
-    async def _build_push_text(self, items: List[VulnItem]) -> str:
+    async def _build_push_text(self, items: List[CveItem]) -> str:
         max_items = int(self.config.get("max_push_items", 10))
         if self.config.get("ai_summary", True):
             self._sync_summarizer_config()
@@ -338,7 +338,7 @@ class VulnPushPlugin(Star):
                 max_items=int(self.config.get("max_push_items", 10)),
             )
         except Exception as exc:  # noqa: BLE001
-            logger.warning("[漏洞推送] 同步 AI 摘要配置异常: %s", exc)
+            logger.warning("[CVE推送] 同步 AI 摘要配置异常: %s", exc)
 
     def _describe_last_summary(self) -> str:
         """把最近一次 AI 摘要结果整理成一行中文状态。"""
@@ -356,12 +356,12 @@ class VulnPushPlugin(Star):
         try:
             return await self.summarizer.self_test()
         except Exception as exc:  # noqa: BLE001
-            logger.exception("[漏洞推送] AI 摘要自检异常: %s", exc)
+            logger.exception("[CVE推送] AI 摘要自检异常: %s", exc)
             return f"[失败] AI 摘要自检异常: {exc}"
 
     async def _prepare_push_text(
         self, limit: int, source_filter: str = "all"
-    ) -> Tuple[str, List[VulnItem]]:
+    ) -> Tuple[str, List[CveItem]]:
         items = await self._collect_for_push(limit, source_filter)
         if not items:
             return "", []
@@ -375,11 +375,11 @@ class VulnPushPlugin(Star):
             try:
                 if await self.context.send_message(target, chain):
                     ok_count += 1
-                    logger.info("[漏洞推送] 成功推送消息至: %s", target)
+                    logger.info("[CVE推送] 成功推送消息至: %s", target)
                 else:
-                    logger.warning("[漏洞推送] 推送失败（未找到对应平台）: %s", target)
+                    logger.warning("[CVE推送] 推送失败（未找到对应平台）: %s", target)
             except Exception as exc:  # noqa: BLE001
-                logger.error("[漏洞推送] 推送消息至 %s 异常: %s", target, exc)
+                logger.error("[CVE推送] 推送消息至 %s 异常: %s", target, exc)
         return ok_count
 
     async def _do_push(
@@ -405,26 +405,60 @@ class VulnPushPlugin(Star):
         return format_raw_message(shown, max_items=int(self.config.get("max_push_items", 10)))
 
     # ------------------------------------------------------------------ 指令
-    @filter.command("vuln", alias={"漏洞"})
-    async def cmd_vuln(self, event: AstrMessageEvent, sub: str = ""):
-        """/vuln [push|status|test|reset]，缺省为抓取最新漏洞推送到当前会话。"""
-        sub = (sub or "").strip().lower()
+    @filter.command_group("cve", alias={"CVE", "漏洞"})
+    async def cve_group(self, event: AstrMessageEvent):
+        """CVE 漏洞情报推送指令组"""
+        pass
+
+    @cve_group.command("push", alias={"推送", "latest"})
+    async def cve_push(self, event: AstrMessageEvent):
+        """抓取最新 CVE 漏洞并推送到当前会话"""
         try:
-            if sub in ("", "fetch", "latest"):
-                yield event.plain_result(await self._cmd_fetch_current())
-            elif sub in ("push",):
-                yield event.plain_result(await self._cmd_push_targets())
-            elif sub in ("status",):
-                yield event.plain_result(self._cmd_status())
-            elif sub in ("test", "ai", "ai-test", "aitest"):
-                yield event.plain_result(await self._cmd_ai_test())
-            elif sub in ("reset",):
-                yield event.plain_result(self._cmd_reset(event))
-            else:
-                yield event.plain_result(self._help_text())
+            yield event.plain_result(await self._cmd_fetch_current())
         except Exception as exc:  # noqa: BLE001
-            logger.exception("[漏洞推送] 指令处理异常: %s", exc)
+            logger.exception("[CVE推送] 指令处理异常: %s", exc)
             yield event.plain_result(f"[失败] 指令处理异常: {exc}")
+
+    @cve_group.command("targets", alias={"目标"})
+    async def cve_push_targets(self, event: AstrMessageEvent):
+        """抓取最新 CVE 漏洞并推送到配置的群聊目标"""
+        try:
+            yield event.plain_result(await self._cmd_push_targets())
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("[CVE推送] 指令处理异常: %s", exc)
+            yield event.plain_result(f"[失败] 指令处理异常: {exc}")
+
+    @cve_group.command("status", alias={"状态"})
+    async def cve_status(self, event: AstrMessageEvent):
+        """查看插件运行状态：定时表达式、信源开关、AI 摘要模型与最近一次摘要结果"""
+        try:
+            yield event.plain_result(self._cmd_status())
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("[CVE推送] 指令处理异常: %s", exc)
+            yield event.plain_result(f"[失败] 指令处理异常: {exc}")
+
+    @cve_group.command("test", alias={"自检", "ai"})
+    async def cve_test(self, event: AstrMessageEvent):
+        """自检 AI 摘要链路：真实调用一次模型并回报候选链、使用模型与耗时"""
+        try:
+            yield event.plain_result(await self._cmd_ai_test())
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("[CVE推送] 指令处理异常: %s", exc)
+            yield event.plain_result(f"[失败] 指令处理异常: {exc}")
+
+    @cve_group.command("reset", alias={"重置"})
+    async def cve_reset(self, event: AstrMessageEvent):
+        """清空全部跨信源去重记录（仅管理员）"""
+        try:
+            yield event.plain_result(self._cmd_reset(event))
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("[CVE推送] 指令处理异常: %s", exc)
+            yield event.plain_result(f"[失败] 指令处理异常: {exc}")
+
+    @cve_group.command("help", alias={"帮助"})
+    async def cve_help(self, event: AstrMessageEvent):
+        """查看 CVE 推送插件的指令帮助"""
+        yield event.plain_result(self._help_text())
 
     async def _cmd_fetch_current(self) -> str:
         text, items = await self._prepare_push_text(limit=10, source_filter="all")
@@ -484,11 +518,12 @@ class VulnPushPlugin(Star):
 
     def _help_text(self) -> str:
         return (
-            "[漏洞推送插件指令]\n"
-            "/vuln - 抓取最新漏洞并推送到当前会话\n"
-            "/vuln push - 抓取并推送到配置的群聊目标\n"
-            "/vuln status - 查看插件运行状态\n"
-            "/vuln reset - 清空去重记录（仅管理员）\n"
-            "/vuln test - 自检 AI 摘要链路（排查模型不可用问题）\n"
-            "LLM 工具: get_latest_vulnerabilities / push_latest_vulnerabilities"
+            "[CVE 漏洞情报推送指令]\n"
+            "/cve push - 抓取最新 CVE 漏洞并推送到当前会话\n"
+            "/cve targets - 抓取并推送到配置的群聊目标\n"
+            "/cve status - 查看插件运行状态\n"
+            "/cve test - 自检 AI 摘要链路（排查模型不可用问题）\n"
+            "/cve reset - 清空去重记录（仅管理员）\n"
+            "/cve help - 查看本帮助\n"
+            "LLM 工具: get_latest_cves / push_latest_cves"
         )

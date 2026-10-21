@@ -1,10 +1,10 @@
-# CVE漏洞推送（astrbot_plugin_vuln_push）
+# CVE漏洞推送（astrbot_plugin_cve_push）
 
 面向 AstrBot 4.x 的多信源 CVE 漏洞情报定时推送插件。
 
 定时抓取 **奇安信威胁情报中心**、**阿里云安全漏洞库（AVD）**、**CNNVD 国家信息安全漏洞库** 三个公开信源的最新漏洞情报，
 跨信源去重后推送到指定群聊，可选调用 AstrBot 已配置的对话模型生成中文摘要，
-并同时注册 `/vuln` 指令与 2 项 LLM 工具，让机器人能"被问到就答"。
+并同时注册 AstrBot 标准指令组 `/cve`（含 6 条子指令）与 2 项 LLM 工具，让机器人能"被问到就答"。
 
 ![version](https://img.shields.io/badge/version-v1.0.1-blue)
 ![astrbot](https://img.shields.io/badge/AstrBot-%3E%3D4.11.2-green)
@@ -40,8 +40,8 @@
 | AI 摘要（可选） | 调用 AstrBot 已配置的对话模型生成"等级 + 受影响产品 + 漏洞描述 + 处置建议"结构化摘要；失败或超时自动降级为原始列表 |
 | 定时任务 | 内置 5 段 cron 解析器，支持 `*`、`a-b`、`*/n`、`a-b/n`、`a,b,c`，无需额外依赖 |
 | 群聊推送 | 支持纯 session_id（`oc_xxx`、群号）或完整 UMO（`telegram:GroupMessage:xxx`）多目标推送 |
-| 指令 | `/vuln`、`/vuln push`、`/vuln status`、`/vuln test`、`/vuln reset`，别名 `/漏洞` |
-| LLM 工具 | 注册 `get_latest_vulnerabilities`、`push_latest_vulnerabilities`，支持自然语言查询与推送 |
+| 指令 | AstrBot 标准指令组 `/cve`：`push`、`targets`、`status`、`test`、`reset`、`help`，别名 `/漏洞` |
+| LLM 工具 | 注册 `get_latest_cves`、`push_latest_cves`，支持自然语言查询与推送 |
 | 故障隔离 | 单个信源抓取失败只记警告，不影响其余信源与整轮推送 |
 | 全链路异常捕获 | 后台协程、指令、LLM 工具、定时循环全部兜底捕获，单个异常不会导致宿主崩溃 |
 | 纯文本输出 | 全插件零 emoji，状态一律 `[完成]` / `[失败]` / `[警告]` / `[提示]` 标签 |
@@ -65,19 +65,19 @@
 ### 方式一：手动放入插件目录（推荐）
 
 1. 下载本仓库（`git clone` 或下载 ZIP 后解压）。
-2. 将整个 `astrbot_plugin_vuln_push` 目录放到 AstrBot 的插件目录下：
+2. 将整个 `astrbot_plugin_cve_push` 目录放到 AstrBot 的插件目录下：
 
    ```
-   <AstrBot 根目录>/data/plugins/astrbot_plugin_vuln_push/
+   <AstrBot 根目录>/data/plugins/astrbot_plugin_cve_push/
    ```
 
    Docker 部署的 AstrBot，对应宿主机路径通常是：
 
    ```
-   <宿主机挂载目录>/data/plugins/astrbot_plugin_vuln_push/
+   <宿主机挂载目录>/data/plugins/astrbot_plugin_cve_push/
    ```
 
-   如果插件目录里已有 `astrbot_plugin_vuln_push-master` 之类带后缀的文件夹，请重命名为 `astrbot_plugin_vuln_push`。
+   如果插件目录里已有 `astrbot_plugin_cve_push-master` 之类带后缀的文件夹，请重命名为 `astrbot_plugin_cve_push`。
 
 3. 依赖检查：本插件只用到 `httpx` 与 `beautifulsoup4`，AstrBot 4.x 已内置，**无需额外安装**。
    如需手动确认：
@@ -91,17 +91,17 @@
 5. 启动日志中出现以下内容即为加载成功：
 
    ```
-   Loading plugin astrbot_plugin_vuln_push ...
-   Plugin astrbot_plugin_vuln_push (v1.0.0) by weskongxing: 定时抓取奇安信 / 阿里云安全 / CNNVD ...
-   plugin(module_path data.plugins.astrbot_plugin_vuln_push.main) added LLM tool: get_latest_vulnerabilities
-   plugin(module_path data.plugins.astrbot_plugin_vuln_push.main) added LLM tool: push_latest_vulnerabilities
+   Loading plugin astrbot_plugin_cve_push ...
+   Plugin astrbot_plugin_cve_push (v1.0.0) by weskongxing: 定时抓取奇安信 / 阿里云安全 / CNNVD ...
+   plugin(module_path data.plugins.astrbot_plugin_cve_push.main) added LLM tool: get_latest_cves
+   plugin(module_path data.plugins.astrbot_plugin_cve_push.main) added LLM tool: push_latest_cves
    [漏洞推送] 已向宿主 AstrBot 暴露 2 项 LLM 工具
    [漏洞推送] 定时任务循环已启动，cron=0 9 * * *
    ```
 
 ### 方式二：WebUI 安装
 
-进入 AstrBot WebUI -> 插件管理 -> 安装插件 -> 上传本仓库打包的 ZIP，或填写仓库地址 `https://github.com/weskongxing/astrbot_plugin_vuln_push`。
+进入 AstrBot WebUI -> 插件管理 -> 安装插件 -> 上传本仓库打包的 ZIP，或填写仓库地址 `https://github.com/weskongxing/astrbot_plugin_cve_push`。
 
 ### 方式三：容器内部署
 
@@ -111,7 +111,7 @@ docker exec -it astrbot bash
 
 # 放入插件
 cd /AstrBot/data/plugins
-git clone https://github.com/weskongxing/astrbot_plugin_vuln_push.git
+git clone https://github.com/weskongxing/astrbot_plugin_cve_push.git
 
 # 退出后重启容器
 exit
@@ -121,18 +121,18 @@ docker restart astrbot
 ### 安装后必做的一步
 
 安装完成后**必须配置推送目标**（`push_targets`），否则定时任务会因"未配置推送目标"而跳过。
-获取 session_id 的方法：在目标群里发送一次 `/vuln status`，从 AstrBot 日志里可以看到该会话的 `unified_msg_origin`，填入配置即可。
+获取 session_id 的方法：在目标群里发送一次 `/cve status`，从 AstrBot 日志里可以看到该会话的 `unified_msg_origin`，填入配置即可。
 
 ---
 
 ## 配置说明
 
 在 AstrBot WebUI -> 插件管理 -> CVE漏洞推送 -> 配置 中修改，或直接编辑
-`data/config/astrbot_plugin_vuln_push_config.json`（修改后需重启生效）。
+`data/config/astrbot_plugin_cve_push_config.json`（修改后需重启生效）。
 
 | 配置键 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `enabled` | bool | `true` | 插件总开关。关闭后定时推送停止，但 `/vuln` 指令与 LLM 工具仍可用 |
+| `enabled` | bool | `true` | 插件总开关。关闭后定时推送停止，但 `/cve` 指令与 LLM 工具仍可用 |
 | `cron_expr` | string | `0 9 * * *` | 定时推送 cron 表达式，默认每天 09:00 |
 | `enabled_sources` | list | `["qianxin","aliyun","cnnvd"]` | 启用信源，按列表顺序抓取 |
 | `push_targets` | list | `[]` | 推送目标列表，支持纯 session_id 或完整 UMO |
@@ -143,7 +143,7 @@ docker restart astrbot
 | `dedup_window_days` | int | `30` | 去重窗口天数，超期记录在写入时自动清理 |
 | `request_timeout` | int | `20` | 单次 HTTP 请求超时秒数 |
 | `max_requests_per_host` | int | `5` | 单次任务对同一域名的最大请求次数（合规限流） |
-| `admin_user_ids` | list | `[]` | 允许执行 `/vuln reset` 的用户 sender_id 列表（平台管理员默认也有权限） |
+| `admin_user_ids` | list | `[]` | 允许执行 `/cve reset` 的用户 sender_id 列表（平台管理员默认也有权限） |
 | `push_only_new` | bool | `true` | 仅推送未推送过的新条目；关闭后每次都推送全部抓到的条目 |
 
 ### 配置示例
@@ -178,18 +178,23 @@ docker restart astrbot
 
 ### 一、指令
 
+`/cve` 是 AstrBot 标准指令组，下面挂载 6 条子指令；每条子指令在 WebUI「指令」列表中都会独立显示，可单独启用、重命名与设置权限。
+
 | 指令 | 别名 | 作用 |
 | --- | --- | --- |
-| `/vuln` | `/漏洞` | 抓取最新漏洞并推送到**当前会话**，同时更新去重记录 |
-| `/vuln push` | - | 抓取并推送到配置的 `push_targets` 群聊目标 |
-| `/vuln status` | - | 查看运行状态：启用状态、cron、下次执行时间、信源开关、AI 开关、AI 摘要模型、最近一次 AI 摘要、推送目标数、去重记录数与最近记录时间 |
-| `/vuln test` | - | 自检 AI 摘要链路：真实调用一次模型，回报候选链与结果 |
-| `/vuln reset` | - | 清空全部去重记录（仅管理员）；用于需要重新推送历史条目时 |
+| `/cve push` | `/cve 推送`、`/漏洞 推送` | 抓取最新 CVE 漏洞并推送到**当前会话**，同时更新去重记录 |
+| `/cve targets` | `/cve 目标` | 抓取并推送到配置的 `push_targets` 群聊目标 |
+| `/cve status` | `/cve 状态` | 查看运行状态：启用状态、cron、下次执行时间、信源开关、AI 开关、AI 摘要模型、最近一次 AI 摘要、推送目标数、去重记录数与最近记录时间 |
+| `/cve test` | `/cve 自检` | 自检 AI 摘要链路：真实调用一次模型，回报候选链与结果 |
+| `/cve reset` | `/cve 重置` | 清空全部去重记录（仅管理员）；用于需要重新推送历史条目时 |
+| `/cve help` | `/cve 帮助` | 查看指令帮助 |
 
-`/vuln status` 输出示例：
+单独发送 `/cve`（不带子指令）时，AstrBot 会直接回复该指令组下的完整指令树，这是指令组的标准行为。
+
+`/cve status` 输出示例：
 
 ```
-[漏洞推送状态]
+插件运行状态
 启用状态: 已启用
 定时表达式: 0 9 * * *
 下次执行时间: 2026-10-22 09:00:00
@@ -210,8 +215,8 @@ AI 摘要模型: <provider_id 或 跟随默认>
 
 | 工具名 | 参数 | 说明 |
 | --- | --- | --- |
-| `get_latest_vulnerabilities` | `limit`（默认 5）、`source`（默认 `all`） | 只返回漏洞文本，不推送，适合"最近有什么高危漏洞"这类提问 |
-| `push_latest_vulnerabilities` | `limit`（默认 5）、`source`（默认 `all`） | 抓取并推送到**当前会话**，适合"把今天的漏洞发到群里" |
+| `get_latest_cves` | `limit`（默认 5）、`source`（默认 `all`） | 只返回漏洞文本，不推送，适合"最近有什么高危漏洞"这类提问 |
+| `push_latest_cves` | `limit`（默认 5）、`source`（默认 `all`） | 抓取并推送到**当前会话**，适合"把今天的漏洞发到群里" |
 
 `source` 取值：`all` / `qianxin` / `aliyun` / `cnnvd`。
 
@@ -277,7 +282,7 @@ AI 摘要关闭或调用失败时，退化为纯列表：
 ## 数据文件与目录结构
 
 ```
-astrbot_plugin_vuln_push/
+astrbot_plugin_cve_push/
 ├── main.py                 插件入口：Star 子类、指令、LLM 工具、定时循环
 ├── metadata.yaml           插件元信息（名称、版本、作者、仓库）
 ├── _conf_schema.json       WebUI 配置表单定义
@@ -285,7 +290,7 @@ astrbot_plugin_vuln_push/
 ├── README.md               本文档
 ├── INTERFACES.md           内部接口与模块契约说明（开发者参考）
 ├── core/
-│   ├── models.py           VulnItem 数据模型与去重键推导
+│   ├── models.py           CveItem 数据模型与去重键推导
 │   ├── cron_util.py        5 段 cron 解析与下次执行时间推算
 │   ├── dedup.py            去重存储（原子写盘 + 窗口清理）
 │   ├── summarizer.py       AI 摘要（仅走 AstrBot 已配置模型，失败降级）
@@ -338,13 +343,13 @@ astrbot_plugin_vuln_push/
 
 ```bash
 # 方式一
-python astrbot_plugin_vuln_push/tests/run_tests.py
+python astrbot_plugin_cve_push/tests/run_tests.py
 
 # 方式二
-cd astrbot_plugin_vuln_push && python tests/run_tests.py
+cd astrbot_plugin_cve_push && python tests/run_tests.py
 
 # 方式三
-python -m unittest discover -s astrbot_plugin_vuln_push/tests -p "test_*.py"
+python -m unittest discover -s astrbot_plugin_cve_push/tests -p "test_*.py"
 ```
 
 预期输出：
@@ -362,13 +367,13 @@ OK
 ### 语法检查
 
 ```bash
-python -m compileall astrbot_plugin_vuln_push
+python -m compileall astrbot_plugin_cve_push
 ```
 
 ### 扩展新信源
 
 1. 在 `sources/` 下新建 `xxx.py`，继承 `sources/base.py` 的 `BaseSource`；
-2. 实现 `name` 与 `async fetch_latest(limit) -> list[VulnItem]`，网络请求一律通过 `self.fetcher`；
+2. 实现 `name` 与 `async fetch_latest(limit) -> list[CveItem]`，网络请求一律通过 `self.fetcher`；
 3. 在 `sources/__init__.py` 的 `build_sources` 中注册；
 4. 在 `_conf_schema.json` 的 `enabled_sources` 提示里补充说明；
 5. 补一个离线 fixture 与单测。
@@ -389,10 +394,10 @@ A：`push_targets` 里的 UMO 前缀与已启用的适配器不匹配。改用�
 A：检查 ① `ai_summary` 已开启；② AstrBot 里已配置可用的对话模型；③ `selected_provider_id` 留空或指向存在的模型；④ 日志中是否有 `[摘要器] 失败` 记录。摘要失败会自动降级为原始列表，不影响推送。
 
 **Q：AI 摘要不生效 / 日志出现 AI 摘要调用失败，已降级: Connection error.？**
-A：按顺序排查：① 发送 `/vuln test` 查看候选链与自检结果；② 确认 `selected_provider_id` 是否选中了可用模型（留空则跟随 AstrBot 默认对话模型）；③ 在 AstrBot 模型页单独确认该模型可用；④ 检查 AstrBot 默认对话模型是否指向已失效的中转地址。插件会按候选链逐个尝试，全部失败时降级为原始列表，不影响漏洞推送本身。
+A：按顺序排查：① 发送 `/cve test` 查看候选链与自检结果；② 确认 `selected_provider_id` 是否选中了可用模型（留空则跟随 AstrBot 默认对话模型）；③ 在 AstrBot 模型页单独确认该模型可用；④ 检查 AstrBot 默认对话模型是否指向已失效的中转地址。插件会按候选链逐个尝试，全部失败时降级为原始列表，不影响漏洞推送本身。
 
 **Q：想重新推送历史条目？**
-A：管理员发送 `/vuln reset` 清空去重记录，或临时把 `push_only_new` 设为 `false`。
+A：管理员发送 `/cve reset` 清空去重记录，或临时把 `push_only_new` 设为 `false`。
 
 **Q：日志里出现"cron 表达式无效"？**
 A：表达式必须是 5 段（`分 时 日 月 周`），不支持 `@daily` 这类别名，也不支持 6 段（秒级）。
@@ -404,14 +409,22 @@ A：不会。后台循环、信源抓取、指令处理、LLM 工具调用、推
 
 ## 更新日志
 
+### v1.0.2
+
+- 指令改为 AstrBot 标准指令组：`/cve push`、`/cve targets`、`/cve status`、`/cve test`、`/cve reset`、`/cve help`，每条子指令在 WebUI「指令」列表中独立可见，可单独启用、重命名与设置权限
+- 指令与插件标识统一由 vuln 更名为 cve：插件 id `astrbot_plugin_cve_push`、显示名「CVE漏洞情报推送」，避免与其它 CVE 插件重名
+- 内部模型同步更名：`CveItem`、`CveSummarizer`、`CvePushPlugin`；字段 `vuln_id` 更名为 `source_id`，读取旧去重记录时自动兼容
+- LLM 工具更名为 `get_latest_cves` / `push_latest_cves`
+- 日志前缀统一为 `[CVE推送]`
+
 ### v1.0.1
 
 - 修复 AI 摘要忽略 `selected_provider_id`、固定走 AstrBot 默认对话模型，并在默认模型不可用时持续降级的问题
 - AI 摘要模型解析改为候选链：插件配置的 `selected_provider_id` -> AstrBot 当前对话模型 -> 任意可用对话模型；前一个失败自动换下一个，全部失败才降级为原始列表
 - 配置改动无需重载插件，每次推送前热读取最新配置
 - 日志打印实际使用的模型 id、耗时与失败原因
-- 新增 `/vuln test`：真实调用一次模型，自检 AI 摘要链路并回报候选链与结果
-- `/vuln status` 新增展示「AI 摘要模型」与「最近一次 AI 摘要」
+- 新增 `/cve test`：真实调用一次模型，自检 AI 摘要链路并回报候选链与结果
+- `/cve status` 新增展示「AI 摘要模型」与「最近一次 AI 摘要」
 
 ### v1.0.0
 

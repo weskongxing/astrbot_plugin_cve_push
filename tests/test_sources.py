@@ -17,10 +17,10 @@ for _p in (_PARENT_DIR, _PLUGIN_DIR):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from astrbot_plugin_vuln_push.sources.aliyun import AliyunSource
-from astrbot_plugin_vuln_push.sources.base import FetchError
-from astrbot_plugin_vuln_push.sources.cnnvd import CnnvdSource, LIST_PATH
-from astrbot_plugin_vuln_push.sources.qianxin import QianxinSource
+from astrbot_plugin_cve_push.sources.aliyun import AliyunSource
+from astrbot_plugin_cve_push.sources.base import FetchError
+from astrbot_plugin_cve_push.sources.cnnvd import CnnvdSource, LIST_PATH
+from astrbot_plugin_cve_push.sources.qianxin import QianxinSource
 
 FIXTURES_DIR = os.path.join(_TESTS_DIR, "fixtures")
 
@@ -59,7 +59,7 @@ class QianxinSourceTests(unittest.IsolatedAsyncioTestCase):
     async def test_mapping_and_dedup_merge(self):
         fixture = json.loads(_load_fixture("qianxin_oneday.json"))
         fetcher = FakeFetcher({
-            "https://ti.qianxin.com/alpha-api/v2/vuln/one-day": fixture,
+            "https://ti.qianxin.com/alpha-api/v2/cve/one-day": fixture,
         })
         source = QianxinSource({}, fetcher)
         items = await source.fetch_latest(limit=10)
@@ -67,44 +67,44 @@ class QianxinSourceTests(unittest.IsolatedAsyncioTestCase):
         # key_vuln_add 与 poc_exp_add 按 id 去重合并，共 3 条
         self.assertEqual(len(items), 3)
 
-        by_vuln_id = {item.vuln_id: item for item in items}
+        by_source_id = {item.source_id: item for item in items}
 
         # key_vuln_add 优先：id=1002 应取 key_vuln_add 的标题
         self.assertEqual(
-            by_vuln_id["QVD-2026-10002"].title,
+            by_source_id["QVD-2026-10002"].title,
             "含 CVE-2026-2222 的权限提升漏洞",
         )
         # cve_code 为空时从 vuln_name 提取 CVE
-        self.assertEqual(by_vuln_id["QVD-2026-10002"].cve_id, "CVE-2026-2222")
+        self.assertEqual(by_source_id["QVD-2026-10002"].cve_id, "CVE-2026-2222")
         # rating_level "critical" 归一化为 "极危"
-        self.assertEqual(by_vuln_id["QVD-2026-10002"].severity, "极危")
+        self.assertEqual(by_source_id["QVD-2026-10002"].severity, "极危")
 
         # 字段映射逐项校验
-        first = by_vuln_id["QVD-2026-10001"]
+        first = by_source_id["QVD-2026-10001"]
         self.assertEqual(first.cve_id, "CVE-2026-1111")
         self.assertEqual(first.severity, "高危")
         self.assertEqual(first.published, "2026-10-21")
-        self.assertEqual(first.url, "https://ti.qianxin.com/vulnerability/detail/1001")
+        self.assertEqual(first.url, "https://ti.qianxin.com/cveerability/detail/1001")
         self.assertEqual(first.tags, ["RCE", "在野利用"])
         self.assertEqual(first.source, "qianxin")
         self.assertEqual(first.source_display, "奇安信")
 
         # high 归一化为 高危；poc_exp_add 中的新 id 正常合并
-        poc_item = by_vuln_id["QVD-2026-10003"]
+        poc_item = by_source_id["QVD-2026-10003"]
         self.assertEqual(poc_item.severity, "高危")
         self.assertEqual(poc_item.cve_id, "CVE-2026-3333")
         self.assertEqual(poc_item.tags, ["反序列化"])
 
         # 按 published 倒序：1003(10-22) -> 1001(10-21) -> 1002(10-20)
         self.assertEqual(
-            [item.vuln_id for item in items],
+            [item.source_id for item in items],
             ["QVD-2026-10003", "QVD-2026-10001", "QVD-2026-10002"],
         )
 
     async def test_limit_truncates(self):
         fixture = json.loads(_load_fixture("qianxin_oneday.json"))
         fetcher = FakeFetcher({
-            "https://ti.qianxin.com/alpha-api/v2/vuln/one-day": fixture,
+            "https://ti.qianxin.com/alpha-api/v2/cve/one-day": fixture,
         })
         source = QianxinSource({}, fetcher)
         items = await source.fetch_latest(limit=2)
@@ -112,7 +112,7 @@ class QianxinSourceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_bad_status_raises_fetch_error(self):
         fetcher = FakeFetcher({
-            "https://ti.qianxin.com/alpha-api/v2/vuln/one-day": {"status": 99999},
+            "https://ti.qianxin.com/alpha-api/v2/cve/one-day": {"status": 99999},
         })
         source = QianxinSource({}, fetcher)
         with self.assertRaises(FetchError):
@@ -130,7 +130,7 @@ class AliyunSourceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(items), 3)
 
         first = items[0]
-        self.assertEqual(first.vuln_id, "AVD-2026-1001")
+        self.assertEqual(first.source_id, "AVD-2026-1001")
         self.assertEqual(first.cve_id, "CVE-2026-3333")
         self.assertEqual(first.title, "某组件远程代码执行漏洞 CVE-2026-3333")
         self.assertEqual(first.published, "2026-10-20")
@@ -140,12 +140,12 @@ class AliyunSourceTests(unittest.IsolatedAsyncioTestCase):
 
         # 状态列为「未定义」时应归一化为「未知」，类型「未定义」时 tags 为空
         second = items[1]
-        self.assertEqual(second.vuln_id, "AVD-2026-1002")
+        self.assertEqual(second.source_id, "AVD-2026-1002")
         self.assertEqual(second.severity, "未知")
         self.assertEqual(second.tags, [])
 
         third = items[2]
-        self.assertEqual(third.vuln_id, "AVD-2026-1003")
+        self.assertEqual(third.source_id, "AVD-2026-1003")
         self.assertEqual(third.cve_id, "CVE-2026-4444")
         self.assertEqual(third.tags, ["CWE-89"])
 
@@ -196,7 +196,7 @@ class CnnvdSourceTests(unittest.IsolatedAsyncioTestCase):
         # 字段映射
         self.assertEqual(len(items), 2)
         first = items[0]
-        self.assertEqual(first.vuln_id, "CNNVD-202610-1001")
+        self.assertEqual(first.source_id, "CNNVD-202610-1001")
         self.assertEqual(first.cve_id, "CVE-2026-5555")
         self.assertEqual(first.severity, "超危")
         self.assertEqual(first.published, "2026-10-21")

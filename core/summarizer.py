@@ -22,9 +22,9 @@ import logging
 import time
 from typing import Any, List, Optional, Tuple
 
-from .models import VulnItem
+from .models import CveItem
 
-logger = logging.getLogger("astrbot_plugin_vuln_push")
+logger = logging.getLogger("astrbot_plugin_cve_push")
 
 _SYSTEM_PROMPT = "你是网络安全情报编辑，负责把多条漏洞情报去重后输出统一中文摘要。"
 
@@ -40,11 +40,11 @@ _USER_PROMPT_TEMPLATE = """下面是最新抓取到的多条漏洞情报（已�
 {items}
 """
 
-_SELF_TEST_ITEM = VulnItem(
+_SELF_TEST_ITEM = CveItem(
     source="self_test",
     source_display="自检",
     title="AI 摘要链路自检示例漏洞",
-    vuln_id="SELF-TEST-0001",
+    source_id="SELF-TEST-0001",
     severity="低危",
     published="2026-01-01",
     url="https://example.com/self-test",
@@ -74,7 +74,7 @@ def _is_chat_provider(provider: Any) -> bool:
     return provider is not None and callable(getattr(provider, "text_chat", None))
 
 
-class VulnSummarizer:
+class CveSummarizer:
     """漏洞摘要器。
 
     只依赖 AstrBot 的 ``Context``：``get_provider_by_id`` / ``get_using_provider_async``
@@ -142,7 +142,7 @@ class VulnSummarizer:
         self._last_error = error
 
     # ------------------------------------------------------------------ 摘要
-    async def summarize(self, items: List[VulnItem]) -> str:
+    async def summarize(self, items: List[CveItem]) -> str:
         """返回结构化中文摘要文本；任何失败返回空字符串并置 last_outcome="降级"。"""
         if not items:
             self._set_state("已关闭")
@@ -351,7 +351,7 @@ class VulnSummarizer:
             return list(insts)
         return []
 
-    def _build_prompt(self, items: List[VulnItem]) -> str:
+    def _build_prompt(self, items: List[CveItem]) -> str:
         chunks: List[str] = []
         for item in items[: self.max_items]:
             fields: List[str] = []

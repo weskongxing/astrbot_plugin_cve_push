@@ -4,28 +4,28 @@ from __future__ import annotations
 
 from typing import List
 
-from .models import VulnItem
+from .models import CveItem
 
 _LENGTH_LIMIT = 3500
 _TRUNCATION_TAIL = "\n...（更多条目已省略）"
 _SEVERITY_FALLBACK = "未知"
 
 
-def _severity(item: VulnItem) -> str:
+def _severity(item: CveItem) -> str:
     value = (item.severity or "").strip()
     return value or _SEVERITY_FALLBACK
 
 
-def _title_text(item: VulnItem) -> str:
+def _title_text(item: CveItem) -> str:
     return (item.title or "").strip() or "未命名漏洞"
 
 
-def _id_part(item: VulnItem) -> str:
+def _id_part(item: CveItem) -> str:
     display_id = item.display_id
     return f"（{display_id}）" if display_id else ""
 
 
-def format_item_line(index: int, item: VulnItem) -> str:
+def format_item_line(index: int, item: CveItem) -> str:
     """格式化单条漏洞为多行纯文本。"""
     lines: List[str] = [f"{index}. [{_severity(item)}] {_title_text(item)}{_id_part(item)}"]
     meta: List[str] = []
@@ -47,7 +47,7 @@ def _apply_length_limit(text: str) -> str:
 
 
 def format_raw_message(
-    items: List[VulnItem],
+    items: List[CveItem],
     title: str = "最新安全漏洞播报",
     max_items: int = 10,
 ) -> str:
@@ -71,7 +71,7 @@ def format_raw_message(
 
 def format_summary_message(
     summary: str,
-    items: List[VulnItem],
+    items: List[CveItem],
     title: str = "安全漏洞情报摘要",
 ) -> str:
     """构建 AI 摘要 + 相关漏洞列表的纯文本消息。"""

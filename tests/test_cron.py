@@ -14,7 +14,7 @@ for _p in (_PARENT_DIR, _PLUGIN_DIR):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from astrbot_plugin_vuln_push.core.cron_util import CronSchedule
+from astrbot_plugin_cve_push.core.cron_util import CronSchedule
 
 
 class CronScheduleTests(unittest.TestCase):
