@@ -37,8 +37,12 @@ from .core.formatter import (
     format_status_message,
     format_summary_message,
 )
-from .core.models import CveItem
-from .core.summarizer import CveSummarizer
+from .core.models import CveItem, merge_cross_source_items
+from .core.summarizer import (
+    CveSummarizer,
+    filter_items_by_summary,
+    filter_unpatched_items,
+)
 from .sources import build_sources
 from .sources.base import HttpFetcher
 
@@ -139,7 +143,7 @@ class PushLatestCvesTool(FunctionTool[AstrAgentContext]):
 # --------------------------------------------------------------------------- #
 # 插件主体
 # --------------------------------------------------------------------------- #
-@register("astrbot_plugin_cve_push", "weskongxing", "CVE漏洞情报推送", "v1.0.2")
+@register("astrbot_plugin_cve_push", "weskongxing", "CVE漏洞情报推送", "v1.1.0")
 class CvePushPlugin(Star):
     """CVE 漏洞推送插件。"""
 
@@ -279,7 +283,7 @@ class CvePushPlugin(Star):
     def _build_fetcher(self) -> HttpFetcher:
         return HttpFetcher(
             timeout=float(self.config.get("request_timeout", 20)),
-            max_requests_per_host=int(self.config.get("max_requests_per_host", 5)),
+            max_requests_per_host=int(self.config.get("max_requests_per_host", 15)),
         )
 
     def _enabled_sources(self, source_filter: str = "all") -> List[str]:
@@ -290,7 +294,7 @@ class CvePushPlugin(Star):
         return sources
 
     async def _fetch_all(self, limit: int, source_filter: str = "all") -> List[CveItem]:
-        """抓取全部启用信源，按披露时间倒序并跨信源去重。"""
+        """抓取全部启用信源，跨源同漏洞合并后按披露时间倒序并去重。"""
         sources = build_sources(self._enabled_sources(source_filter), {}, self._build_fetcher())
         items: List[CveItem] = []
         for src in sources:
@@ -299,6 +303,7 @@ class CvePushPlugin(Star):
             except Exception as exc:  # noqa: BLE001
                 logger.warning("[CVE推送] 信源 %s 抓取失败: %s", src.name, exc)
 
+        items = merge_cross_source_items(items)
         items.sort(key=lambda it: it.published or "", reverse=True)
         seen: Set[str] = set()
         deduped: List[CveItem] = []
@@ -323,10 +328,19 @@ class CvePushPlugin(Star):
     async def _build_push_text(self, items: List[CveItem]) -> str:
         max_items = int(self.config.get("max_push_items", 10))
         if self.config.get("ai_summary", True):
+            unpatched = filter_unpatched_items(items)
+            if not unpatched:
+                return ""
             self._sync_summarizer_config()
-            summary = await self.summarizer.summarize(items)
+            summary = await self.summarizer.summarize(unpatched)
             if summary:
-                return format_summary_message(summary, items)
+                if "[全部已修复]" in summary or "全部已修复" in summary:
+                    return ""
+                kept_items = filter_items_by_summary(unpatched, summary)
+                if not kept_items:
+                    return ""
+                return format_summary_message(summary, kept_items)
+            return format_raw_message(unpatched, max_items=max_items)
         return format_raw_message(items, max_items=max_items)
 
     def _sync_summarizer_config(self) -> None:
@@ -365,6 +379,27 @@ class CvePushPlugin(Star):
         items = await self._collect_for_push(limit, source_filter)
         if not items:
             return "", []
+        max_items = int(self.config.get("max_push_items", 10))
+        if self.config.get("ai_summary", True):
+            unpatched = filter_unpatched_items(items)
+            if not unpatched:
+                self.dedup.mark_pushed(items)
+                return "", []
+            self._sync_summarizer_config()
+            summary = await self.summarizer.summarize(unpatched)
+            if summary:
+                if "[全部已修复]" in summary or "全部已修复" in summary:
+                    self.dedup.mark_pushed(items)
+                    return "", []
+                kept_items = filter_items_by_summary(unpatched, summary)
+                if not kept_items:
+                    self.dedup.mark_pushed(items)
+                    return "", []
+                text = format_summary_message(summary, kept_items)
+                self.dedup.mark_pushed(items)
+                return text, kept_items
+            self.dedup.mark_pushed(items)
+            return format_raw_message(unpatched, max_items=max_items), unpatched
         text = await self._build_push_text(items)
         return text, items
 

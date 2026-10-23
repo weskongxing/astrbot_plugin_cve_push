@@ -116,14 +116,22 @@ class DedupStore:
                         pass
 
     # ------------------------------------------------------------------ 对外
+    @staticmethod
+    def _item_keys(item: CveItem) -> List[str]:
+        if hasattr(item, "all_dedup_keys") and callable(item.all_dedup_keys):
+            keys = item.all_dedup_keys()
+            if keys:
+                return keys
+        return [item.dedup_key]
+
     def is_pushed(self, item: CveItem) -> bool:
         with self._lock:
-            return item.dedup_key in self._records
+            return any(k in self._records for k in self._item_keys(item))
 
     def filter_new(self, items: List[CveItem]) -> List[CveItem]:
         """保持原顺序，过滤掉已推送的条目。"""
         with self._lock:
-            return [item for item in items if item.dedup_key not in self._records]
+            return [item for item in items if not self.is_pushed(item)]
 
     def mark_pushed(self, items: List[CveItem], now: Optional[float] = None) -> None:
         """标记一组条目为已推送，并清理过期记录后持久化。"""
@@ -133,7 +141,8 @@ class DedupStore:
             now = time.time()
         with self._lock:
             for item in items:
-                self._records[item.dedup_key] = now
+                for key in self._item_keys(item):
+                    self._records[key] = now
             self._prune(now)
             self._save()
 

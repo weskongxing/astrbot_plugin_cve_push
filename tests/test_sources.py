@@ -19,7 +19,7 @@ for _p in (_PARENT_DIR, _PLUGIN_DIR):
 
 from astrbot_plugin_cve_push.sources.aliyun import AliyunSource
 from astrbot_plugin_cve_push.sources.base import FetchError
-from astrbot_plugin_cve_push.sources.cnnvd import CnnvdSource, LIST_PATH
+from astrbot_plugin_cve_push.sources.cnnvd import CnnvdSource, DETAIL_API_PATH, LIST_PATH, ORIGIN
 from astrbot_plugin_cve_push.sources.qianxin import QianxinSource
 
 FIXTURES_DIR = os.path.join(_TESTS_DIR, "fixtures")
@@ -59,7 +59,7 @@ class QianxinSourceTests(unittest.IsolatedAsyncioTestCase):
     async def test_mapping_and_dedup_merge(self):
         fixture = json.loads(_load_fixture("qianxin_oneday.json"))
         fetcher = FakeFetcher({
-            "https://ti.qianxin.com/alpha-api/v2/cve/one-day": fixture,
+            "https://ti.qianxin.com/alpha-api/v2/vuln/one-day": fixture,
         })
         source = QianxinSource({}, fetcher)
         items = await source.fetch_latest(limit=10)
@@ -84,7 +84,7 @@ class QianxinSourceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first.cve_id, "CVE-2026-1111")
         self.assertEqual(first.severity, "高危")
         self.assertEqual(first.published, "2026-10-21")
-        self.assertEqual(first.url, "https://ti.qianxin.com/cveerability/detail/1001")
+        self.assertEqual(first.url, "https://ti.qianxin.com/vulnerability/detail/1001")
         self.assertEqual(first.tags, ["RCE", "在野利用"])
         self.assertEqual(first.source, "qianxin")
         self.assertEqual(first.source_display, "奇安信")
@@ -104,7 +104,7 @@ class QianxinSourceTests(unittest.IsolatedAsyncioTestCase):
     async def test_limit_truncates(self):
         fixture = json.loads(_load_fixture("qianxin_oneday.json"))
         fetcher = FakeFetcher({
-            "https://ti.qianxin.com/alpha-api/v2/cve/one-day": fixture,
+            "https://ti.qianxin.com/alpha-api/v2/vuln/one-day": fixture,
         })
         source = QianxinSource({}, fetcher)
         items = await source.fetch_latest(limit=2)
@@ -112,11 +112,53 @@ class QianxinSourceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_bad_status_raises_fetch_error(self):
         fetcher = FakeFetcher({
-            "https://ti.qianxin.com/alpha-api/v2/cve/one-day": {"status": 99999},
+            "https://ti.qianxin.com/alpha-api/v2/vuln/one-day": {"status": 99999},
         })
         source = QianxinSource({}, fetcher)
         with self.assertRaises(FetchError):
             await source.fetch_latest()
+
+    async def test_patch_flag_and_cnnvd_id_parsed(self):
+        payload = {
+            "status": 10000,
+            "data": {
+                "key_vuln_add": [
+                    {
+                        "id": 2001,
+                        "qvd_code": "QVD-2026-20001",
+                        "cve_code": "CVE-2026-7001",
+                        "cnnvd_id": "cnnvd-2026-0001",
+                        "patch_flag": 1,
+                        "vuln_name": "已修复漏洞",
+                        "rating_level": "高危",
+                        "publish_time": "2026-10-22 09:00:00",
+                    },
+                    {
+                        "id": 2002,
+                        "qvd_code": "QVD-2026-20002",
+                        "cve_code": "CVE-2026-7002",
+                        "cnnvd_id": "CNNVD-2026-0002",
+                        "patch_flag": 0,
+                        "vuln_name": "未修复漏洞",
+                        "rating_level": "高危",
+                        "publish_time": "2026-10-21 09:00:00",
+                    },
+                ],
+                "poc_exp_add": [],
+                "vuln_add": [],
+            },
+        }
+        fetcher = FakeFetcher({
+            "https://ti.qianxin.com/alpha-api/v2/vuln/one-day": payload,
+        })
+        source = QianxinSource({}, fetcher)
+        items = await source.fetch_latest(limit=10)
+        by_id = {item.source_id: item for item in items}
+
+        self.assertTrue(by_id["QVD-2026-20001"].is_patched)
+        self.assertEqual(by_id["QVD-2026-20001"].cnnvd_id, "CNNVD-2026-0001")
+        self.assertFalse(by_id["QVD-2026-20002"].is_patched)
+        self.assertEqual(by_id["QVD-2026-20002"].cnnvd_id, "CNNVD-2026-0002")
 
 
 class AliyunSourceTests(unittest.IsolatedAsyncioTestCase):
@@ -222,6 +264,33 @@ class CnnvdSourceTests(unittest.IsolatedAsyncioTestCase):
         source = CnnvdSource({}, fetcher)
         with self.assertRaises(FetchError):
             await source.fetch_latest()
+
+    async def test_detail_enrichment_fills_cve_and_patch_status(self):
+        sign_url = "https://www.cnnvd.org.cn/cnnvdweb/tourist/sign"
+        list_url = "https://www.cnnvd.org.cn/cnnvdweb/homePage/hotVulNewList"
+        detail_url = ORIGIN + DETAIL_API_PATH
+        list_resp = json.loads(_load_fixture("cnnvd_hotvul.json"))
+
+        fetcher = FakeFetcher({
+            sign_url: {"code": 200, "data": "sig123"},
+            list_url: list_resp,
+            detail_url: {
+                "code": 200,
+                "data": {
+                    "cveId": "CVE-2026-6666",
+                    "fixStatus": "已修复",
+                    "vulDesc": "测试详情描述",
+                },
+            },
+        })
+        source = CnnvdSource({}, fetcher)
+        items = await source.fetch_latest(limit=10)
+        by_id = {item.source_id: item for item in items}
+
+        target = by_id["CNNVD-202610-1002"]
+        self.assertEqual(target.cve_id, "CVE-2026-6666")
+        self.assertTrue(target.is_patched)
+        self.assertEqual(target.description, "测试详情描述")
 
 
 if __name__ == "__main__":

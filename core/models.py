@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import re
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 _CVE_RE = re.compile(r"CVE-\d{4}-\d{4,7}", re.IGNORECASE)
 _SPACE_RE = re.compile(r"\s+")
@@ -25,6 +25,8 @@ class CveItem:
     url: str = ""
     description: str = ""
     tags: List[str] = field(default_factory=list)
+    cnnvd_id: str = ""
+    is_patched: Optional[bool] = None
 
     # ------------------------------------------------------------------ 派生
     @property
@@ -35,6 +37,25 @@ class CveItem:
         if self.source_id:
             return "vid:" + self.source_id.upper()
         return "title:" + self.title_fingerprint
+
+    def all_dedup_keys(self) -> List[str]:
+        """收集该漏洞关联的所有唯一标识键（去重且保序）。"""
+        keys: List[str] = []
+        if self.cve_id:
+            key = "cve:" + self.cve_id.strip().upper()
+            if key not in keys:
+                keys.append(key)
+        if self.cnnvd_id:
+            key = "vid:" + self.cnnvd_id.strip().upper()
+            if key not in keys:
+                keys.append(key)
+        if self.source_id and not self.cve_id:
+            key = "vid:" + self.source_id.strip().upper()
+            if key not in keys:
+                keys.append(key)
+        if not keys:
+            keys.append("title:" + self.title_fingerprint)
+        return keys
 
     @property
     def title_fingerprint(self) -> str:
@@ -94,3 +115,108 @@ def normalize_severity(raw: str) -> str:
     if value in SEVERITY_ORDER:
         return value
     return mapping.get(value.lower(), value or "未知")
+
+
+def _extract_item_cnnvd(item: CveItem) -> str:
+    """提取条目关联的 CNNVD 编号（大写）。"""
+    if item.cnnvd_id and item.cnnvd_id.strip():
+        return item.cnnvd_id.strip().upper()
+    sid = (item.source_id or "").strip().upper()
+    if sid.startswith("CNNVD-"):
+        return sid
+    return ""
+
+
+def merge_cross_source_items(items: List[CveItem]) -> List[CveItem]:
+    """跨信源或同信源同漏洞智能归并，统一合并并保留 CVE 编号。"""
+    if not items:
+        return []
+
+    cloned = [CveItem.from_dict(item.to_dict()) for item in items]
+
+    # 1) 建立 CNNVD -> CVE 映射表
+    cnnvd_to_cve: Dict[str, str] = {}
+    for item in cloned:
+        cve = (item.cve_id or "").strip().upper()
+        cnnvd = _extract_item_cnnvd(item)
+        if cnnvd and not item.cnnvd_id:
+            item.cnnvd_id = cnnvd
+        if cve and cnnvd:
+            item.cve_id = cve
+            cnnvd_to_cve.setdefault(cnnvd, cve)
+
+    # 2) 为仅有 CNNVD 编号但命中映射表的条目回填 CVE 编号
+    for item in cloned:
+        cnnvd = _extract_item_cnnvd(item)
+        if cnnvd and not item.cnnvd_id:
+            item.cnnvd_id = cnnvd
+        if not item.cve_id and cnnvd and cnnvd in cnnvd_to_cve:
+            item.cve_id = cnnvd_to_cve[cnnvd]
+
+    # 3) 按主键归并
+    grouped: Dict[str, CveItem] = {}
+    for item in cloned:
+        cve = (item.cve_id or "").strip().upper()
+        cnnvd = (item.cnnvd_id or "").strip().upper()
+        sid = (item.source_id or "").strip().upper()
+        if cve:
+            item.cve_id = cve
+            group_key = "cve:" + cve
+        elif cnnvd:
+            item.cnnvd_id = cnnvd
+            group_key = "vid:" + cnnvd
+        elif sid:
+            group_key = "vid:" + sid
+        else:
+            group_key = "title:" + item.title_fingerprint
+
+        if group_key not in grouped:
+            grouped[group_key] = item
+            continue
+
+        primary = grouped[group_key]
+
+        # 合并 cve_id 与 cnnvd_id
+        if not primary.cve_id and cve:
+            primary.cve_id = cve
+        if not primary.cnnvd_id and cnnvd:
+            primary.cnnvd_id = cnnvd
+        if not primary.source_id and item.source_id:
+            primary.source_id = item.source_id
+
+        # 合并 description（取较长者）
+        if len(item.description or "") > len(primary.description or ""):
+            primary.description = item.description
+
+        # 合并 tags（去重保序）
+        merged_tags = list(primary.tags or [])
+        for t in item.tags or []:
+            if t and t not in merged_tags:
+                merged_tags.append(t)
+        primary.tags = merged_tags
+
+        # 合并 severity（若原为未知或空，或新条目风险等级更高）
+        if item.severity and item.severity != "未知":
+            if (
+                not primary.severity
+                or primary.severity == "未知"
+                or severity_rank(item.severity) < severity_rank(primary.severity)
+            ):
+                primary.severity = item.severity
+
+        # 合并 published 与 url
+        if not primary.published and item.published:
+            primary.published = item.published
+        if not primary.url and item.url:
+            primary.url = item.url
+
+        # 合并 is_patched：任一为 True 则为 True，否则任一为 False 则为 False，否则 None
+        if primary.is_patched is True or item.is_patched is True:
+            primary.is_patched = True
+        elif primary.is_patched is False or item.is_patched is False:
+            primary.is_patched = False
+        else:
+            primary.is_patched = None
+
+    return list(grouped.values())
+

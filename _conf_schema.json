@@ -25,7 +25,7 @@
   },
   "ai_summary": {
     "description": "启用 AI 摘要",
-    "hint": "开启后使用 AstrBot 已配置对话模型生成结构化中文摘要；失败自动降级为原始列表",
+    "hint": "开启后过滤已修复漏洞，并使用 AstrBot 已配置对话模型对未修复漏洞生成结构化中文摘要（CNNVD/CVE 同漏洞自动合并保留 CVE）；失败自动降级为原始列表",
     "type": "bool",
     "default": true
   },
@@ -62,9 +62,9 @@
   },
   "max_requests_per_host": {
     "description": "单次任务每域名最大请求数",
-    "hint": "同一域名单次抓取任务的最大请求次数，防止对目标站点造成压力，默认 5",
+    "hint": "同一域名单次抓取任务的最大请求次数，防止对目标站点造成压力，默认 15",
     "type": "int",
-    "default": 5
+    "default": 15
   },
   "admin_user_ids": {
     "description": "管理员用户 ID 列表",

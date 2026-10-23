@@ -18,7 +18,11 @@ for _p in (_PARENT_DIR, _PLUGIN_DIR):
         sys.path.insert(0, _p)
 
 from astrbot_plugin_cve_push.core.models import CveItem
-from astrbot_plugin_cve_push.core.summarizer import CveSummarizer
+from astrbot_plugin_cve_push.core.summarizer import (
+    CveSummarizer,
+    filter_items_by_summary,
+    filter_unpatched_items,
+)
 
 
 def make_item(**overrides: Any) -> CveItem:
@@ -308,6 +312,36 @@ class SummarizerConfigAndFilterTests(unittest.TestCase):
         text = _run(summarizer.summarize([make_item()]))
         self.assertEqual(text, "去重后一次")
         self.assertEqual(shared.call_count, 1)
+
+    def test_filter_unpatched_items(self):
+        patched = make_item(cve_id="CVE-2026-0001", is_patched=True)
+        unpatched = make_item(cve_id="CVE-2026-0002", is_patched=False)
+        unknown = make_item(cve_id="CVE-2026-0003", is_patched=None)
+
+        filtered = filter_unpatched_items([patched, unpatched, unknown])
+        self.assertEqual(filtered, [unpatched, unknown])
+        self.assertEqual(
+            CveSummarizer.filter_unpatched_items([patched, unpatched, unknown]),
+            [unpatched, unknown],
+        )
+
+    def test_filter_items_by_summary(self):
+        item1 = make_item(cve_id="CVE-2026-0001", is_patched=False)
+        item2 = make_item(cve_id="CVE-2026-0002", is_patched=False)
+
+        self.assertEqual(filter_items_by_summary([item1, item2], "[全部已修复]"), [])
+        self.assertEqual(
+            CveSummarizer.filter_items_by_summary([item1, item2], "[全部已修复]"),
+            [],
+        )
+
+        summary_one = "[高危] CVE-2026-0001 某组件 - 存在远程代码执行风险 | 建议限制访问"
+        kept = filter_items_by_summary([item1, item2], summary_one)
+        self.assertEqual(kept, [item1])
+        self.assertEqual(
+            CveSummarizer.filter_items_by_summary([item1, item2], summary_one),
+            [item1],
+        )
 
 
 class SummarizerSelfTestTests(unittest.TestCase):

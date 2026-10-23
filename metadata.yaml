@@ -1,7 +1,7 @@
 name: astrbot_plugin_cve_push
 display_name: CVE漏洞情报推送
-desc: 定时抓取奇安信 / 阿里云安全 / CNNVD 最新 CVE 漏洞情报，跨信源去重 + 可选 AI 摘要，推送到群聊，并注册 /cve 指令组与 2 项 LLM 工具
-version: v1.0.2
+desc: 聚合奇安信、阿里云安全（AVD）、CNNVD 三大权威漏洞情报源的定时/手动推送插件，支持跨源同漏洞合并（CNNVD/CVE 关联保留 CVE）、AI 过滤已修复漏洞及多级模型回退。
+version: v1.1.0
 author: weskongxing
 repo: https://github.com/weskongxing/astrbot_plugin_vuln_push
 astrbot_version: ">=4.11.2"

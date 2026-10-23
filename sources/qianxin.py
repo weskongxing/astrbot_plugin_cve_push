@@ -6,15 +6,15 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from ..core.models import CveItem, extract_cve, normalize_severity
 from .base import BaseSource, FetchError
 
 logger = logging.getLogger("astrbot_plugin_cve_push")
 
-API_URL = "https://ti.qianxin.com/alpha-api/v2/cve/one-day"
-DETAIL_URL_BASE = "https://ti.qianxin.com/cveerability/detail/"
+API_URL = "https://ti.qianxin.com/alpha-api/v2/vuln/one-day"
+DETAIL_URL_BASE = "https://ti.qianxin.com/vulnerability/detail/"
 
 _DEFAULT_HEADERS = {
     "Referer": "https://ti.qianxin.com/",
@@ -72,18 +72,16 @@ class QianxinSource(BaseSource):
             data = resp.get("data") or {}
             key_vuln_add = data.get("key_vuln_add") or []
             poc_exp_add = data.get("poc_exp_add") or []
+            vuln_add = data.get("vuln_add") or []
 
-            # 合并去重：key_vuln_add 优先，poc_exp_add 仅补充缺失 id。
+            # 合并去重：优先级 key_vuln_add -> poc_exp_add -> vuln_add。
             merged: Dict[str, Dict[str, Any]] = {}
-            for record in key_vuln_add:
-                if isinstance(record, dict):
-                    key = str(record.get("id"))
-                    merged.setdefault(key, record)
-            for record in poc_exp_add:
-                if isinstance(record, dict):
-                    key = str(record.get("id"))
-                    if key and key not in merged:
-                        merged[key] = record
+            for group in (key_vuln_add, poc_exp_add, vuln_add):
+                for record in group:
+                    if isinstance(record, dict):
+                        key = str(record.get("id") or "")
+                        if key and key not in merged:
+                            merged[key] = record
 
             items = [self._to_item(record) for record in merged.values()]
             items.sort(key=lambda item: item.published or "", reverse=True)
@@ -99,6 +97,15 @@ class QianxinSource(BaseSource):
         vuln_name = str(record.get("vuln_name") or "")
         cve_code = str(record.get("cve_code") or "")
         published_raw = str(record.get("publish_time") or "")
+        cnnvd_id = str(record.get("cnnvd_id") or "").strip().upper()
+        patch_flag = record.get("patch_flag")
+        is_patched: Optional[bool]
+        if patch_flag == 1 and patch_flag is not True or patch_flag is True:
+            is_patched = True
+        elif patch_flag == 0 and patch_flag is not False or patch_flag is False:
+            is_patched = False
+        else:
+            is_patched = None
         return CveItem(
             source=QianxinSource.name,
             source_display=QianxinSource.display_name,
@@ -110,4 +117,6 @@ class QianxinSource(BaseSource):
             url=DETAIL_URL_BASE + str(record.get("id") or ""),
             description=_truncate(str(record.get("description") or "")),
             tags=_extract_tags(record.get("tag")),
+            cnnvd_id=cnnvd_id,
+            is_patched=is_patched,
         )

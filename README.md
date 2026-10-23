@@ -6,7 +6,7 @@
 跨信源去重后推送到指定群聊，可选调用 AstrBot 已配置的对话模型生成中文摘要，
 并同时注册 AstrBot 标准指令组 `/cve`（含 6 条子指令）与 2 项 LLM 工具，让机器人能"被问到就答"。
 
-![version](https://img.shields.io/badge/version-v1.0.1-blue)
+![version](https://img.shields.io/badge/version-v1.1.0-blue)
 ![astrbot](https://img.shields.io/badge/AstrBot-%3E%3D4.11.2-green)
 ![python](https://img.shields.io/badge/Python-3.10%2B-yellow)
 ![license](https://img.shields.io/badge/license-MIT-lightgrey)
@@ -35,9 +35,9 @@
 | 功能 | 说明 |
 | --- | --- |
 | 多信源聚合 | 一次任务抓取奇安信 / 阿里云安全 / CNNVD 三个信源，按披露时间倒序合并 |
-| 跨信源去重 | 同一漏洞被多个信源收录时只保留一条，去重键优先级：CVE 编号 > 源内编号 > 标题指纹 |
+| 跨信源去重与合并 | 自动补全 CNNVD 详情中的关联 CVE 编号与补丁状态，跨信源 CNNVD 与 CVE 同漏洞智能合并并统一保留 CVE 编号；去重键优先级：CVE 编号 > 源内编号 > 标题指纹 |
 | 增量推送 | 去重记录落盘持久化，只推送未推送过的新条目，重启不丢状态 |
-| AI 摘要（可选） | 调用 AstrBot 已配置的对话模型生成"等级 + 受影响产品 + 漏洞描述 + 处置建议"结构化摘要；失败或超时自动降级为原始列表 |
+| AI 摘要与已修复过滤（可选） | 调用 AstrBot 已配置的对话模型生成"等级 + 受影响产品 + 漏洞描述 + 处置建议"结构化摘要，并结合信源官方补丁状态与 AI 语义判断自动过滤已修复漏洞（仅推送未修复漏洞）；失败或超时自动降级为原始列表 |
 | 定时任务 | 内置 5 段 cron 解析器，支持 `*`、`a-b`、`*/n`、`a-b/n`、`a,b,c`，无需额外依赖 |
 | 群聊推送 | 支持纯 session_id（`oc_xxx`、群号）或完整 UMO（`telegram:GroupMessage:xxx`）多目标推送 |
 | 指令 | AstrBot 标准指令组 `/cve`：`push`、`targets`、`status`、`test`、`reset`、`help`，别名 `/漏洞` |
@@ -52,9 +52,9 @@
 
 | 信源 | 配置值 | 获取方式 | 字段 |
 | --- | --- | --- | --- |
-| 奇安信威胁情报中心 | `qianxin` | 公开 POST JSON 接口（当日漏洞列表） | QVD 编号、CVE 编号、漏洞名称、危害等级、披露时间 |
+| 奇安信威胁情报中心 | `qianxin` | 公开 GET JSON 接口 `/alpha-api/v2/vuln/one-day`（合并 `key_vuln_add`/`poc_exp_add`/`vuln_add` 当日漏洞列表） | QVD 编号、CVE 编号、漏洞名称、危害等级、披露时间、奇安信评级/补丁状态 |
 | 阿里云安全漏洞库 | `aliyun` | 首页服务端渲染 HTML 表格解析 | AVD 编号、CVE 编号、漏洞名称、漏洞类型、披露时间 |
-| CNNVD 国家信息安全漏洞库 | `cnnvd` | 站点公开"游客签名"通道（先取签名再请求热点漏洞列表） | CNNVD 编号、CVE 编号、漏洞名称、危害等级、披露时间 |
+| CNNVD 国家信息安全漏洞库 | `cnnvd` | 站点公开"游客签名"通道（取热点漏洞列表并按需请求详情接口补全关联信息） | CNNVD 编号、CVE 编号、漏洞名称、危害等级、披露时间、官方补丁状态 |
 
 三个信源均为**公开可读数据**，插件只做只读抓取，不含任何登录凭据、Cookie、绕过或爆破逻辑。
 
@@ -142,7 +142,7 @@ docker restart astrbot
 | `max_push_items` | int | `10` | 单次推送展示的漏洞条数上限 |
 | `dedup_window_days` | int | `30` | 去重窗口天数，超期记录在写入时自动清理 |
 | `request_timeout` | int | `20` | 单次 HTTP 请求超时秒数 |
-| `max_requests_per_host` | int | `5` | 单次任务对同一域名的最大请求次数（合规限流） |
+| `max_requests_per_host` | int | `15` | 单次任务对同一域名的最大请求次数（合规限流） |
 | `admin_user_ids` | list | `[]` | 允许执行 `/cve reset` 的用户 sender_id 列表（平台管理员默认也有权限） |
 | `push_only_new` | bool | `true` | 仅推送未推送过的新条目；关闭后每次都推送全部抓到的条目 |
 
@@ -328,7 +328,7 @@ astrbot_plugin_cve_push/
 - 只读公开接口，**不携带任何 Cookie、Token 或登录凭据**；
 - 使用标准浏览器 User-Agent，不做伪装与反检测对抗；
 - 同一域名两次请求强制间隔 **>= 1.2 秒**，禁止并发轰炸；
-- 单次任务对同一域名请求数上限 **5 次**（可通过 `max_requests_per_host` 调整）；
+- 单次任务对同一域名请求数上限 **15 次**（可通过 `max_requests_per_host` 调整）；
 - 失败采用指数退避，最多重试 **2 次**；
 - 不使用登录绕过、验证码识别、参数爆破、目录扫描、注入探测等任何手段；
 - CNNVD 使用的是站点为匿名访客提供的**公开游客签名通道**，不是登录绕过；需要登录的检索接口与数据包下载接口一律未使用。
@@ -408,6 +408,13 @@ A：不会。后台循环、信源抓取、指令处理、LLM 工具调用、推
 ---
 
 ## 更新日志
+
+### v1.1.0
+
+- 修复奇安信今日漏洞接口地址（切换至 `/alpha-api/v2/vuln/one-day` 并合并 `key_vuln_add`/`poc_exp_add`/`vuln_add`）
+- 跨信源 CNNVD 与 CVE 同漏洞智能合并（自动补全 CNNVD 详情中的关联 CVE 编号与补丁状态，合并同漏洞条目并统一保留 CVE 编号）
+- 开启 AI 摘要后自动过滤已修复漏洞（结合信源官方补丁状态与 AI 语义判断，仅推送未修复漏洞）
+- 默认 `max_requests_per_host` 更新为 `15`
 
 ### v1.0.2
 

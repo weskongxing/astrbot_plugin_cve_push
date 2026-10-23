@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import List
+from typing import List, Optional
 
 from bs4 import BeautifulSoup
 
@@ -77,13 +77,28 @@ class AliyunSource(BaseSource):
             cve_type = cells[2].get_text(" ", strip=True)
             published = cells[3].get_text(" ", strip=True)
             status = cells[4].get_text(" ", strip=True)
+            is_patched: Optional[bool] = None
+            btn_texts = [status]
+            for btn in cells[4].find_all("button"):
+                btn_texts.append(btn.get_text(" ", strip=True))
+                btn_texts.append(str(btn.get("title") or ""))
+            joined_status = " ".join(btn_texts)
+            if any(k in joined_status for k in ("补丁发布", "已修复", "官方补丁")):
+                is_patched = True
+            elif any(k in joined_status for k in ("暂无补丁", "未修复")):
+                is_patched = False
 
             cve_id = extract_cve(title)
+            if not cve_id:
+                for btn in cells[4].find_all("button"):
+                    cve_id = extract_cve(str(btn.get("title") or ""))
+                    if cve_id:
+                        break
             tags: List[str] = []
             if cve_type and cve_type != _UNDEFINED:
                 tags = [cve_type]
 
-            if status == _UNDEFINED:
+            if status == _UNDEFINED or status in ("CVE PoC", "CVE", "PoC"):
                 severity = normalize_severity("")
             else:
                 severity = normalize_severity(status)
@@ -100,6 +115,7 @@ class AliyunSource(BaseSource):
                     url=SITE_BASE + href,
                     description="",
                     tags=tags,
+                    is_patched=is_patched,
                 )
             )
         return items

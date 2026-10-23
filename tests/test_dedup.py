@@ -16,7 +16,7 @@ for _p in (_PARENT_DIR, _PLUGIN_DIR):
         sys.path.insert(0, _p)
 
 from astrbot_plugin_cve_push.core.dedup import DedupStore
-from astrbot_plugin_cve_push.core.models import CveItem
+from astrbot_plugin_cve_push.core.models import CveItem, merge_cross_source_items
 
 
 def make_item(**overrides):
@@ -134,6 +134,65 @@ class DedupStoreTests(unittest.TestCase):
                 json.dump({"version": 1, "records": "not-a-dict"}, f)
             store = DedupStore(path)
             self.assertEqual(store.stats()["total"], 0)
+
+    def test_merge_cross_source_cnnvd_and_cve(self):
+        q_item = make_item(
+            source="qianxin",
+            source_id="QVD-2026-8888",
+            cve_id="CVE-2026-8888",
+            cnnvd_id="CNNVD-2026-123456",
+            is_patched=False,
+        )
+        c_item = make_item(
+            source="cnnvd",
+            source_id="CNNVD-2026-123456",
+            cve_id="",
+            cnnvd_id="CNNVD-2026-123456",
+            is_patched=None,
+        )
+        merged = merge_cross_source_items([q_item, c_item])
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0].cve_id, "CVE-2026-8888")
+        self.assertEqual(merged[0].display_id, "CVE-2026-8888")
+
+        item_a = make_item(
+            source="qianxin",
+            source_id="QVD-2026-8888",
+            cve_id="CVE-2026-8888",
+            cnnvd_id="CNNVD-2026-123456",
+            is_patched=False,
+        )
+        item_b = make_item(
+            source="cnnvd",
+            source_id="CNNVD-2026-123456",
+            cve_id="CVE-2026-8888",
+            cnnvd_id="CNNVD-2026-123456",
+            is_patched=True,
+        )
+        merged_both = merge_cross_source_items([item_a, item_b])
+        self.assertEqual(len(merged_both), 1)
+        self.assertEqual(merged_both[0].cve_id, "CVE-2026-8888")
+        self.assertEqual(merged_both[0].display_id, "CVE-2026-8888")
+        self.assertTrue(merged_both[0].is_patched)
+
+    def test_dedup_store_cross_cnnvd_and_cve(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = DedupStore(os.path.join(tmp, "dedup.json"))
+            pushed_item = make_item(
+                source="qianxin",
+                source_id="QVD-2026-9999",
+                cve_id="CVE-2026-9999",
+                cnnvd_id="CNNVD-2026-999999",
+            )
+            store.mark_pushed([pushed_item])
+
+            cnnvd_only_item = make_item(
+                source="cnnvd",
+                source_id="CNNVD-2026-999999",
+                cve_id="",
+            )
+            self.assertTrue(store.is_pushed(cnnvd_only_item))
+            self.assertEqual(store.filter_new([cnnvd_only_item]), [])
 
 
 if __name__ == "__main__":

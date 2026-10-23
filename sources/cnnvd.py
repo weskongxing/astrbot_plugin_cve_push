@@ -22,7 +22,15 @@ ORIGIN = "https://www.cnnvd.org.cn"
 BASE = "/cnnvdweb"
 SIGN_PATH = BASE + "/tourist/sign"
 LIST_PATH = BASE + "/homePage/hotVulNewList"
+DETAIL_API_PATH = BASE + "/homePage/searchVulByCnnvdCode"
 DETAIL_URL_TEMPLATE = "https://www.cnnvd.org.cn/frontend/detail?vulId={vul_id}"
+
+_DESCRIPTION_LIMIT = 300
+
+
+def _truncate(text: str | None, limit: int = _DESCRIPTION_LIMIT) -> str:
+    value = (text or "").strip()
+    return value if len(value) <= limit else value[:limit]
 
 
 class CnnvdSource(BaseSource):
@@ -51,7 +59,9 @@ class CnnvdSource(BaseSource):
             "Referer": ORIGIN + "/",
         }
 
-    async def _get_signature(self) -> tuple[str, str, str]:
+    async def _get_signature(
+        self, path: str = LIST_PATH
+    ) -> tuple[str, str, str]:
         """获取游客签名。
 
         返回 (signature, timestamp, nonce)。
@@ -60,7 +70,7 @@ class CnnvdSource(BaseSource):
         """
         timestamp = self._timestamp()
         nonce = self._make_nonce()
-        sign_str = "POST" + LIST_PATH + timestamp + nonce
+        sign_str = "POST" + path + timestamp + nonce
         headers = self._base_headers(timestamp, nonce)
         resp = await self.fetcher.request(
             "POST",
@@ -76,9 +86,40 @@ class CnnvdSource(BaseSource):
             raise FetchError("CNNVD 游客签名接口返回空签名")
         return signature, timestamp, nonce
 
+    async def _fetch_detail(self, cnnvd_code: str) -> Dict[str, Any]:
+        """按 CNNVD 编号查询详情，异常时静默降级返回空字典。"""
+        if not cnnvd_code:
+            return {}
+        detail_url = ORIGIN + DETAIL_API_PATH
+        responses_by_url = getattr(self.fetcher, "responses_by_url", None)
+        if isinstance(responses_by_url, dict) and detail_url not in responses_by_url:
+            return {}
+        try:
+            signature, timestamp, nonce = await self._get_signature(
+                DETAIL_API_PATH
+            )
+            headers = self._base_headers(timestamp, nonce)
+            headers["X-Sign"] = signature
+            resp = await self.fetcher.request(
+                "POST",
+                detail_url,
+                headers=headers,
+                json_body={"cnnvdCode": cnnvd_code},
+                expect_json=True,
+            )
+            if isinstance(resp, dict) and resp.get("code") == 200:
+                data = resp.get("data")
+                if isinstance(data, dict):
+                    return data
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(
+                "[漏洞推送] CNNVD 详情补全跳过 (%s): %s", cnnvd_code, exc
+            )
+        return {}
+
     async def fetch_latest(self, limit: int = 10) -> List[CveItem]:
         try:
-            signature, timestamp, nonce = await self._get_signature()
+            signature, timestamp, nonce = await self._get_signature(LIST_PATH)
             headers = self._base_headers(timestamp, nonce)
             headers["X-Sign"] = signature
             resp = await self.fetcher.request(
@@ -101,25 +142,55 @@ class CnnvdSource(BaseSource):
             if not isinstance(data, list):
                 raise FetchError("CNNVD 漏洞列表结构异常，data 不是数组")
             items = [self._to_item(record) for record in data if isinstance(record, dict)]
-            return items[: max(0, int(limit))]
+            items = items[: max(0, int(limit))]
         except FetchError:
             raise
         except Exception as exc:  # noqa: BLE001
             logger.exception("[漏洞推送] CNNVD 数据解析异常: %s", exc)
             raise FetchError(f"CNNVD 数据解析异常: {exc}") from exc
 
+        if self.config.get("enrich_detail", True):
+            for item in items:
+                if not item.cve_id or item.is_patched is None:
+                    try:
+                        detail = await self._fetch_detail(item.source_id)
+                    except Exception:  # noqa: BLE001
+                        detail = {}
+                    if not detail:
+                        continue
+                    cve_id = extract_cve(str(detail.get("cveId") or ""))
+                    if cve_id:
+                        item.cve_id = cve_id
+                    vul_desc = str(
+                        detail.get("vulDesc") or detail.get("vulDetail") or ""
+                    ).strip()
+                    if vul_desc:
+                        item.description = _truncate(vul_desc)
+                    fix_status = str(detail.get("fixStatus") or "").strip()
+                    patch_link = str(
+                        detail.get("officialPatchLink") or ""
+                    ).strip()
+                    if fix_status == "已修复" or bool(patch_link):
+                        item.is_patched = True
+                    elif fix_status == "未修复":
+                        item.is_patched = False
+
+        return items
+
     @staticmethod
     def _to_item(record: Dict[str, Any]) -> CveItem:
         vul_name = str(record.get("vulName") or "")
+        cnnvd_code = str(record.get("cnnvdCode") or "").strip()
         return CveItem(
             source=CnnvdSource.name,
             source_display=CnnvdSource.display_name,
             title=vul_name,
-            source_id=str(record.get("cnnvdCode") or ""),
+            source_id=cnnvd_code,
             cve_id=extract_cve(vul_name),
             severity=normalize_severity(str(record.get("hazardLevel") or "")),
             published=str(record.get("publishTime") or ""),
             url=DETAIL_URL_TEMPLATE.format(vul_id=str(record.get("vulId") or "")),
             description="",
             tags=[],
+            cnnvd_id=cnnvd_code.upper(),
         )

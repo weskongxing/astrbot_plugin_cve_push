@@ -26,16 +26,24 @@ from .models import CveItem
 
 logger = logging.getLogger("astrbot_plugin_cve_push")
 
-_SYSTEM_PROMPT = "你是网络安全情报编辑，负责把多条漏洞情报去重后输出统一中文摘要。"
+_SYSTEM_PROMPT = (
+    "你是网络安全情报编辑，负责对多条漏洞情报进行跨编号去重、过滤已修复漏洞，"
+    "并仅对未修复漏洞输出统一中文摘要。"
+)
 
-_USER_PROMPT_TEMPLATE = """下面是最新抓取到的多条漏洞情报（已去重）。请把重复或同源的条目合并，输出统一中文摘要。
-每条一行，格式为：
-[风险等级] 影响组件/产品 - 一句话影响说明（40-80 字）| 处置建议一句话
+_USER_PROMPT_TEMPLATE = """下面是最新抓取到的多条漏洞情报。请严格按以下规则处理并输出统一中文摘要：
+
+1. 同漏洞跨编号去重：若多条情报指向同一漏洞（如同时存在 CNNVD 编号与 CVE 编号），必须合并为一条，且统一保留 CVE 编号，不重复输出 CNNVD 条目。
+2. 过滤已修复漏洞：结合情报中的「补丁状态」与描述语义判断漏洞是否已有官方补丁或已修复（例如描述中明确提及“在 X.Y.Z 之前版本存在漏洞”、“升级至 X.Y.Z 修复”或补丁状态为已修复）。已修复的漏洞直接丢弃不输出，仅输出尚未修复/暂无官方补丁的漏洞摘要。
+3. 若所有输入漏洞均已修复，仅输出一行：[全部已修复]
+4. 每条未修复漏洞输出一行，格式为：
+[风险等级] 漏洞编号 影响组件/产品 - 一句话影响说明（40-80 字）| 临时缓解建议一句话
+（优先展示 CVE 编号，无 CVE 编号时再展示源编号）
 
 约束：
 - 严禁输出任何 emoji
 - 严禁编造未提供的 CVE 编号或厂商
-- 只输出结果，不要标题、编号或任何解释
+- 只输出结果，不要标题、序号或任何多余解释
 
 {items}
 """
@@ -355,13 +363,28 @@ class CveSummarizer:
         chunks: List[str] = []
         for item in items[: self.max_items]:
             fields: List[str] = []
-            display_id = item.display_id or "-"
-            fields.append(f"编号: {display_id}")
+            if item.cve_id:
+                fields.append(f"编号: {item.cve_id}")
+                related_id = getattr(item, "cnnvd_id", "") or item.source_id
+                if related_id and related_id.upper() != item.cve_id.upper():
+                    fields.append(
+                        f"关联编号: {related_id}（主编号为 CVE: {item.cve_id}）"
+                    )
+            else:
+                display_id = item.display_id or "-"
+                fields.append(f"编号: {display_id}")
             if item.source_display:
                 fields.append(f"来源: {item.source_display}")
             fields.append(f"标题: {item.title or '未命名漏洞'}")
             if item.severity:
                 fields.append(f"风险等级: {item.severity}")
+            is_patched = getattr(item, "is_patched", None)
+            if is_patched is True:
+                fields.append("补丁状态: 已修复/已有官方补丁")
+            elif is_patched is False:
+                fields.append("补丁状态: 未修复/暂无官方补丁")
+            else:
+                fields.append("补丁状态: 未知（请结合描述判断）")
             if item.description:
                 desc = " ".join(str(item.description).split())
                 fields.append(f"描述: {desc[:300]}")
@@ -371,3 +394,49 @@ class CveSummarizer:
                 fields.append(f"链接: {item.url}")
             chunks.append("\n".join(fields))
         return _USER_PROMPT_TEMPLATE.format(items="\n\n".join(chunks))
+
+    @staticmethod
+    def filter_unpatched_items(items: List[CveItem]) -> List[CveItem]:
+        return filter_unpatched_items(items)
+
+    @staticmethod
+    def filter_items_by_summary(items: List[CveItem], summary: str) -> List[CveItem]:
+        return filter_items_by_summary(items, summary)
+
+
+def filter_unpatched_items(items: List[CveItem]) -> List[CveItem]:
+    """规则层前置过滤：剔除明确标记为已修复（is_patched is True）的漏洞条目。"""
+    return [
+        item for item in (items or []) if getattr(item, "is_patched", None) is not True
+    ]
+
+
+def filter_items_by_summary(items: List[CveItem], summary: str) -> List[CveItem]:
+    """根据 AI 摘要内容筛选未修复漏洞条目。
+
+    - 若摘要返回 "全部已修复" 或 "[全部已修复]"，返回空列表 []；
+    - 若摘要中显式包含某些条目的 cve_id / cnnvd_id / source_id，仅保留被提及的条目；
+    - 若摘要未包含任何具体编号（兼容旧格式或测试桩文本），保留全部传入 items。
+    """
+    if not items:
+        return []
+    text = (summary or "").strip()
+    if not text:
+        return list(items)
+    if "[全部已修复]" in text or "全部已修复" in text:
+        return []
+
+    text_upper = text.upper()
+    matched: List[CveItem] = []
+    for item in items:
+        candidate_ids = [
+            getattr(item, "cve_id", "") or "",
+            getattr(item, "cnnvd_id", "") or "",
+            getattr(item, "source_id", "") or "",
+        ]
+        if any(cid and cid.upper() in text_upper for cid in candidate_ids):
+            matched.append(item)
+
+    if matched:
+        return matched
+    return list(items)
